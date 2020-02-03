@@ -1,10 +1,9 @@
 'strict mode'
 
 const Telegraf = require('telegraf')
-const http = require('http');
-const fs = require('fs');
 
 const buttons = require('./buttons');
+const keyboards = require('./keyboards');
 const dbCon = require('./databaseConnection');
 const db = require('./databaseFunctions');
 
@@ -12,11 +11,22 @@ const app = new Telegraf('1030576944:AAEgABxuJs3dQTTEU7EMKhgYiemx9Vw8qyI')
 
 const property = 'data'
 
-const channel_id = "-1001394963347";
+// Things to change
+const channel_id = "-1001394963347"; // The channel to be posted on
+const channel_chat_id = "-1001394963347"; // The channel to be posted on
+const admin_pass = "yesadminpass1278"
+const admin_operations_pass = "yesadminpass1278"
 
+// ^^^^^^^^^^^^^^^^^^^^^
+
+const phoneRegExp = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/im;
+const emailRegexp = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+let ui_messages = {};
 
 // Wait for database async initialization finished (storageFileAsync or your own asynchronous storage adapter)
 dbCon.localSession.DB.then(DB => {
+    ui_messages = DB.get('customMessages').value()[0];
     // Database now initialized, so now you can retrieve anything you want from it
     // console.log('Current LocalSession DB:', DB.value())
     // console.log(DB.get('sessions').getById('1:1').value())
@@ -30,32 +40,45 @@ app.command('start', (ctx) => {
     if (user) {
         if (user.type == 'job_seeker') {
             let command = ctx.update.message.text.split(' ')[1]
+
             if (command) {
                 var job = db.getJob(ctx, command)
-                ctx.reply('Do you want to apply for ' + job.title + '?', buttons.apply_emp)
+                if (job == null) {
+                    return
+                }
+                ctx.reply(ui_messages['apply_confirm_question'] + job.title + '?', {reply_markup:buttons.apply_emp.reply_markup, parse_mode:'markdown'})
                 let emp = db.getApplicant(ctx, ctx.from.id)
                 db.setApplyJob(ctx, emp.index, job)
                 return
             }
         }
     }
-    // console.log(user)
-    // if (user == null){
-
-    // }else if (user.type == 'employer') {
-    //     db.setCommandEmployer(ctx, user.index, '', null);
-    // } else if (user.type == 'job_seeker') {
-    //     db.setCommand(ctx, user.index, '');
-    // }
-    // user.type = null
-    // user.command = '';
-    // db.resetUser(ctx, user, user.index)
-
+    // **** Keyboard
+    ctx.telegram.sendMessage(ctx.from.id, '...',keyboards.welcome()).then()
     ctx.telegram.sendMessage(
         ctx.from.id,
-        'Welcome to the Yes.et job bot! \nRight Fit. Right Now. \n Are you an Employer or a Job Seeker?',
-        buttons.welcome)
+        ui_messages['welcome_message_user'],
+        {reply_markup:buttons.welcome.reply_markup, parse_mode: 'markdown'})
 })
+
+app.command('feedback', (ctx) => {
+    let user = db.getUser(ctx);
+    if (user) {
+        db.setCommandUser(ctx, user.index, 'feedback')
+        ctx.telegram.sendMessage(
+            ctx.from.id,
+            ui_messages['feedback'], { parse_mode: 'markdown' })
+    }
+    else {
+        ctx.telegram.sendMessage(
+            ctx.from.id,
+            ui_messages['feedback_negative'], {reply_markup:buttons.welcome.reply_markup, parse_mode: 'markdown'})
+
+    }
+
+})
+
+
 app.command('admin', (ctx) => {
     let user = db.getUser(ctx);
 
@@ -65,6 +88,11 @@ app.command('admin', (ctx) => {
                 ctx.from.id,
                 `Welcome to the Yes.et job bot! $user.name \nRight Fit. Right Now. \n ADMIN ACCOUNT`,
                 buttons.admin)
+        } else if (user.type == 'admin_operations') {
+            ctx.telegram.sendMessage(
+                ctx.from.id,
+                `Welcome to the Yes.et job bot! $user.name \nRight Fit. Right Now. \n ADMIN ACCOUNT`,
+                buttons.admin_operations)
         } else {
             ctx.telegram.sendMessage(
                 ctx.from.id,
@@ -85,6 +113,7 @@ app.command('admin', (ctx) => {
         user.id = ctx.from.id;
         user.userid = ctx.from.id;
         user.type = null
+        user.chatId = ctx.update.message.chat.id
         ctx[property + 'DB'].get('users').push(user).write()
     }
 
@@ -94,15 +123,35 @@ app.on('callback_query', (ctx) => {
     const action = ctx.update.callback_query.data;
     //--------------------------------------------------- Apply For a Job
     if (action === 'apply_for_job') {
+
         let index = db.findIndex(ctx, ctx.from.id)
         let job = ctx[property + 'DB'].get('employees').value()[index].apply
-        let emp = db.getEmployee(ctx, index)
-        ctx.reply('You have successfully applied to ' + job.title)
+        
+        if (job.question == null) {
+            db.applyForJob(ctx, job.id)
+            let index_employer = db.findEmployer(ctx, job.userid)
+            db.setApplicantEmployer(ctx, index_employer, ctx.from.id)
+            jobSeekerAction(ctx)
+            ctx.reply(ui_messages['apply_successful'] + job.title, { parse_mode: 'markdown' })
+        } else {
+            ctx.reply('*' + job.question + '*' + job.title, { parse_mode: 'markdown', reply_markup: buttons.screening_answer.reply_markup})
+        }
+
+    } else if (action === 'yes') {
+
+        let index = db.findIndex(ctx, ctx.from.id)
+        let job = ctx[property + 'DB'].get('employees').value()[index].apply
+
         db.applyForJob(ctx, job.id)
         let index_employer = db.findEmployer(ctx, job.userid)
         db.setApplicantEmployer(ctx, index_employer, ctx.from.id)
-        job.chatId ? ctx.telegram.sendMessage(job.chatId, 'New Applicant \n' + emp.name + '\nPhone and Email - ' + emp.phone + ', ' + emp.email, buttons.download_applicant_cv).then() : false
         jobSeekerAction(ctx)
+        ctx.reply(ui_messages['apply_successful'] + job.title, { parse_mode: 'markdown' })
+
+    }
+    else if (action === 'no') {
+        ctx.reply(ui_messages['apply_fail'], { parse_mode: 'markdown' })
+
     }
     else if (action === 'get_applicant_cv') {
         let index = db.findEmployer(ctx, ctx.from.id)
@@ -112,64 +161,168 @@ app.on('callback_query', (ctx) => {
         if (emp.cv != '') {
             ctx.telegram.sendDocument(msg.chat.id, emp.cv)
         } else {
-            ctx.reply('Applicant has not uploaded CV')
+            ctx.reply(ui_messages['no_applicant_cv'], { parse_mode: 'markdown' })
         }
-    } 
+    }
     // --------------------------------------------------- Job Seeker
     else if (action === 'job_seeker') {
-        ctx.reply('Find the right job!')
         jobSeekerAction(ctx)
     } else if (action === 'edit_emp_profile') {
         let index = db.findIndex(ctx, ctx.from.id)
 
-        ctx.reply('Profile Edit\nPlease Enter your First and Last name', buttons.cancel_emp)
+        ctx.reply(ui_messages['employee_edit'], {reply_markup: buttons.cancel_emp.reply_markup, parse_mode:'markdown'})
         db.setCommand(ctx, index, 'name')
     } else if (action === 'view_emp_profile') {
         let index = db.findIndex(ctx, ctx.from.id)
 
         let emp = db.getEmployee(ctx, index)
-        ctx.reply('Name: ' + emp.name + '\nEmail and Phone: ' + emp.email + ', ' + emp.phone)
+        ctx.reply('*Name:* ' + emp.name + '\n*Email and Phone: *' + emp.email + ', ' + emp.phone, {reply_markup:buttons.applied_jobs.reply_markup, parse_mode:'markdown'})
     } else if (action === 'cancel_emp') {
         let index = db.findIndex(ctx, ctx.from.id)
 
         ctx.reply('Operation Canceled')
-        jobSeekerAction(ctx, index)
+        jobSeekerAction(ctx)
+    } else if (action === 'applied_jobs') {
+        let index = db.findIndex(ctx, ctx.from.id)
+        let jobs = db.getEmployee(ctx, index).appliedJobs
+        if (jobs.length > 0) {
+            let job = db.getJob(ctx, jobs[0])
+            let status = job.closed ? '\n *This job is Closed.*' : '\n'
+            ctx.reply(ui_messages['employee_applied_jobs'] +'\n' + job.title + status, {reply_markup:buttons.browse_applied_jobs.reply_markup, parse_mode:'markdown'})
+            db.setAppliedPageEmp(ctx, index, 0)
+
+        } else {
+            ctx.reply(ui_messages['employee_no_applied_jobs'], {parse_mode:'markdown'})
+            jobSeekerAction(ctx)
+        }
+    } else if (action === 'previous_emp_applied') {
+        let index = db.findIndex(ctx, ctx.from.id)
+        let jobs = db.getEmployee(ctx, index).appliedJobs
+        let page = db.getEmployee(ctx, index).applied_page
+        const msg = ctx.update.callback_query.message
+
+        if (page > 0) {
+            let job = db.getJob(ctx, jobs[page - 1])
+            let status = job.closed ? '\n *This job is Closed.*' : '\n'
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, job.title + status, {reply_markup:buttons.browse_applied_jobs.reply_markup, parse_mode:'markdown'}).then()
+            db.setAppliedPageEmp(ctx, index, page - 1)
+        } else if (page == 0) {
+            let job = db.getJob(ctx, jobs[page])
+            let status = job.closed ? '\n *This job is Closed.*' : '\n'
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, job.title + status + '\nNo Previous Page', {reply_markup:buttons.browse_applied_jobs.reply_markup, parse_mode: 'markdown'}).then()
+        }
+
+    } else if (action === 'next_emp_applied') {
+        let index = db.findIndex(ctx, ctx.from.id)
+        let jobs = db.getEmployee(ctx, index).appliedJobs
+        let page = db.getEmployee(ctx, index).applied_page
+        const msg = ctx.update.callback_query.message
+
+        if (page + 1 < jobs.length) {
+            let job = db.getJob(ctx, jobs[page + 1])
+            let status = job.closed ? '\n *This job is Closed.*' : '\n'
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, job.title + status, {reply_markup:buttons.browse_applied_jobs.reply_markup, parse_mode:'markdown'}).then()
+            db.setAppliedPageEmp(ctx, index, page + 1)
+        } else if (page + 1 == jobs.length) {
+            let job = db.getJob(ctx, jobs[page])
+            let status = job.closed ? '\n *This job is Closed.*' : '\n'
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, job.title + status + '\nNo Next Page', {reply_markup:buttons.browse_applied_jobs.reply_markup, parse_mode:'markdown'}).then()
+        }
+
+    } else if (action === 'detail_emp_applied_job') {
+        let index = db.findIndex(ctx, ctx.from.id)
+        let jobs = db.getEmployee(ctx, index).appliedJobs
+        let page = db.getEmployee(ctx, index).applied_page
+
+        let job = db.getJob(ctx, jobs[page] )
+        ctx.reply(ui_messages['job_details'] + '\n' + job.title + '\n' + job.description, {parse_mode: 'markdown'})
     }
+
 
     // ---------------------------------------------------- Employer
     else if (action === 'employer') {
-        ctx.reply('Find the right fit!')
         employerAction(ctx)
+    } else if (action === 'email') {
+        index = db.findEmployer(ctx, ctx.from.id)
+        db.setCommandEmployer(ctx, index, 'email_employer', null)
+        ctx.reply(ui_messages['employer_email'], {parse_mode: 'markdown'})
+    } else if (action === 'phone') {
+        index = db.findEmployer(ctx, ctx.from.id)
+        db.setCommandEmployer(ctx, index, 'phone_employer', null)
+        ctx.reply(ui_messages['employer_phone'], {parse_mode: 'markdown'})
     } else if (action === 'new_job') {
         let index = db.findEmployer(ctx, ctx.from.id)
-        ctx.reply('What is the Title of your job?', buttons.cancel_employer)
+        ctx.reply(ui_messages['new_job_title'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
         db.setCommandEmployer(ctx, index, 'new_job_title', null)
+    } else if (action === 'add_screening_question') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        ctx.reply( ui_messages['pre_screening_question'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
+        db.setCommandEmployer(ctx, index, 'pre-screening', null)
     } else if (action === 'my_jobs') {
         let index = db.findEmployer(ctx, ctx.from.id)
 
-        let jobs = db.getActiveJobs(ctx)
+        let jobs = db.getActiveJobs(ctx, 'pending')
         if (jobs.length > 0) {
-            let status = jobs[0].reviewed ? '\n This job is posted. Applicants - ' + jobs[0].applicants.length : '\n This job is being reviewed'
-            ctx.reply('Your Jobs\n' + jobs[0].title + status, buttons.browse_jobs)
+            let status = jobs[0].reviewed ? '\n' + ui_messages['job_is_posted'] + jobs[0].applicants.length : '\n' + ui_messages['job_is_being_reviewed']
+            ctx.reply(ui_messages['pending_jobs']+'\n' + jobs[0].title + status, {reply_markup:buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'})
             db.setJobPage(ctx, index, 0, jobs)
         } else {
-            ctx.reply('No active jobs with this account :(\n')
-            employerAction(ctx)
+            ctx.reply(ui_messages['no_pending_jobs'], {parse_mode: 'markdown'})
+            // employerAction(ctx)
+        }
+    } else if (action === 'pending_employer') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        let jobs = db.getActiveJobs(ctx, 'pending')
+        const msg = ctx.update.callback_query.message
+
+        if (jobs.length > 0) {
+            let status = jobs[0].reviewed ? '\n' + ui_messages['job_is_posted'] + jobs[0].applicants.length : '\n' + ui_messages['job_is_being_reviewed']
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, ui_messages['pending_jobs']+'\n' + jobs[0].title + status, {reply_markup: buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'}).then()
+            db.setJobPage(ctx, index, 0, jobs)
+        } else {
+            ctx.reply(ui_messages['no_pending_jobs'], {parse_mode: 'markdown'})
+        }
+    } else if (action === 'active_employer') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        let jobs = db.getActiveJobs(ctx, 'active')
+        const msg = ctx.update.callback_query.message
+
+        if (jobs.length > 0) {
+            let status = jobs[0].reviewed ? '\n' + ui_messages['job_is_posted'] + jobs[0].applicants.length : '\n' + ui_messages['job_is_being_reviewed']
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, ui_messages['active_jobs'] +'\n' + jobs[0].title + status, {reply_markup: buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'}).then()
+            db.setJobPage(ctx, index, 0, jobs)
+        } else {
+            ctx.reply(ui_messages['no_active_jobs'], {parse_mode: 'markdown'})
+        }
+    } else if (action === 'closed_employer') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        let jobs = db.getActiveJobs(ctx, 'closed')
+        const msg = ctx.update.callback_query.message
+
+        if (jobs.length > 0) {
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, ui_messages['closed_jobs'] + '\n' + jobs[0].title, {reply_markup: buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'}).then()
+            db.setJobPage(ctx, index, 0, jobs)
+        } else {
+            ctx.reply(ui_messages['no_closed_jobs'], {parse_mode: 'markdown'})
         }
     } else if (action === 'previous') {
         let index = db.findEmployer(ctx, ctx.from.id)
         let jobs = ctx[property + 'DB'].get('employers').value()[index].jobs
         let page = ctx[property + 'DB'].get('employers').value()[index].jobsPage
         const msg = ctx.update.callback_query.message
+        let opening = jobs[page].closed ? ui_messages['closed_jobs'] + '\n' : (jobs[page].reviewed ? ui_messages['active_jobs']+'\n' : ui_messages['pending_jobs'] + '\n')
 
         if (page > 0) {
-            let status = jobs[page - 1].reviewed ? '\n This job is posted. Applicants - ' + jobs[page - 1].applicants.length : '\n This job is being reviewed';
-            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, jobs[page - 1].title + status, buttons.browse_jobs).then()
+            let status = jobs[page - 1].reviewed && !jobs[page - 1].closed ? '\n' + ui_messages['job_is_posted'] + jobs[page - 1].applicants.length : '';
+            !jobs[page - 1].closed && !jobs[page - 1].reviewed ? status += '\n' + ui_messages['job_is_being_reviewed'] : ''
+             jobs[page - 1].closed ? status += '\n*This job is closed*':''
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, opening + jobs[page - 1].title + status, {reply_markup: buttons.browse_jobs(jobs[page - 1].reviewed).reply_markup, parse_mode: 'markdown'}).then()
             db.setJobPage(ctx, index, page - 1, null)
         } else if (page == 0) {
-            let status = jobs[page].reviewed ? '\n This job is posted. Applicants - ' + jobs[page].applicants.length : '\n This job is being reviewed';
-
-            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, jobs[page].title + status + '\nNo Previous Page', buttons.browse_jobs)
+            let status = jobs[page].reviewed && !jobs[page].closed ? '\n' + ui_messages['job_is_posted'] + jobs[page].applicants.length : '\n';
+            !jobs[page].closed && !jobs[page].reviewed ? status += '\n' + ui_messages['job_is_being_reviewed'] : ''
+            jobs[page].closed ? status += '\n*This job is closed*':''
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, opening + jobs[page].title + status + '\n' + ui_messages['no_previous_page'], {reply_markup: buttons.browse_jobs(jobs[page].reviewed).reply_markup, parse_mode: 'markdown'}).then()
         }
 
     } else if (action === 'next') {
@@ -178,29 +331,33 @@ app.on('callback_query', (ctx) => {
         let jobs = ctx[property + 'DB'].get('employers').value()[index].jobs
         let page = ctx[property + 'DB'].get('employers').value()[index].jobsPage
         const msg = ctx.update.callback_query.message
-        if (page + 1 < jobs.length) {
-            let status = jobs[page + 1].reviewed ? '\n This job is posted. Applicants - ' + jobs[page + 1].applicants.length : '\n This job is being reviewed'
+        let opening = jobs[page].closed ?  ui_messages['closed_jobs']+'\n' : (jobs[page].reviewed ? ui_messages['active_jobs']+'\n' : ui_messages['pending_jobs']+'\n')
 
-            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, jobs[page + 1].title + status, buttons.browse_jobs).then()
+        if (page + 1 < jobs.length) {
+            let status = jobs[page + 1].reviewed && !jobs[page + 1].closed ? '\n' + ui_messages['job_is_posted'] + jobs[page + 1].applicants.length : '\n';
+            !jobs[page + 1].closed && !jobs[page + 1].reviewed? status += '\n' + ui_messages['job_is_being_reviewed'] : ''
+            jobs[page + 1].closed ? status += '\n *This job is closed*':''
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, opening + jobs[page + 1].title + status, {reply_markup: buttons.browse_jobs(jobs[page + 1].reviewed).reply_markup, parse_mode: 'markdown'}).then()
             db.setJobPage(ctx, index, page + 1, null)
         } else if (page + 1 == jobs.length) {
-            let status = jobs[page].reviewed ? '\n This job is posted. Applicants - ' + jobs[page].applicants.length : '\n This job is being reviewed'
-
-            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, jobs[page].title + status + '\nNo Next Page', buttons.browse_jobs)
+            let status = jobs[page].reviewed && !jobs[page].closed ? '\n' + ui_messages['job_is_posted'] + jobs[page].applicants.length : '\n';
+            !jobs[page].closed && !jobs[page].reviewed? status += '\n' + ui_messages['job_is_being_reviewed'] : ''
+            jobs[page].closed ? status += '\n *This job is closed*':''
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, opening + jobs[page].title + status + '\n' + ui_messages['no_next_page'], {reply_markup: buttons.browse_jobs(jobs[page].reviewed).reply_markup, parse_mode: 'markdown'}).then()
         }
     } else if (action === 'edit_job') {
         let index = db.findEmployer(ctx, ctx.from.id)
         let jobs = ctx[property + 'DB'].get('employers').value()[index].jobs
         let page = ctx[property + 'DB'].get('employers').value()[index].jobsPage
 
-        ctx.reply('Job Edit\nPlease Enter Job Title', buttons.cancel_employer)
+        ctx.reply(ui_messages['edit_job_title'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
         db.setCommandEmployer(ctx, index, 'edit_job_title', null)
     } else if (action === 'detail_job') {
         let index = db.findEmployer(ctx, ctx.from.id)
         let jobs = ctx[property + 'DB'].get('employers').value()[index].jobs
         let page = ctx[property + 'DB'].get('employers').value()[index].jobsPage
 
-        ctx.reply('Job Details\n' + jobs[page].title + '\n' + jobs[page].description)
+        ctx.reply( ui_messages['job_details']+'\n' + jobs[page].title + '\n' + jobs[page].description, {parse_mode: 'markdown'})
     } else if (action === 'close_job') {
 
         let index = db.findEmployer(ctx, ctx.from.id)
@@ -211,8 +368,8 @@ app.on('callback_query', (ctx) => {
         if (jobs.length > page) {
             db.closeJob(ctx, job.id)
             if (job.reviewed)
-                app.telegram.editMessageText(264335782, job.message_id, null, job.title + '\nThis Job is Closed!')
-            ctx.reply(job.title + ' Job Closed!')
+                app.telegram.editMessageText(channel_chat_id, job.message_id, null, job.title + '\nThis Job is Closed!')
+            ctx.reply(job.title + ' *Job Closed!*', {parse_mode: 'markdown'})
             jobs = db.getActiveJobs(ctx)
             if (jobs.length > page + 1)
                 db.setJobPage(ctx, index, page, jobs)
@@ -228,10 +385,10 @@ app.on('callback_query', (ctx) => {
 
         if (jobs[page].applicants.length > 0) {
             let applicant = db.getApplicant(ctx, jobs[page].applicants[0])
-            ctx.reply('Applicants \n' + applicant.name + '\n' + applicant.phone, buttons.browse_applicants)
+            ctx.reply(ui_messages['applicants'] + '\n' + applicant.name + '\n' + applicant.phone, {reply_markup: buttons.browse_applicants.reply_markup, parse_mode: 'markdown'})
             db.setApplicantPage(ctx, index, 0, jobs[page].applicants)
         } else {
-            ctx.reply('No Applicants for this Job :(\n')
+            ctx.reply(ui_messages['no_applicants'], {parse_mode: 'markdown'})
             employerAction(ctx)
         }
     } else if (action === 'previous_app') {
@@ -243,11 +400,11 @@ app.on('callback_query', (ctx) => {
 
         if (page > 0) {
             let applicant = db.getApplicant(ctx, applicants[page - 1])
-            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, 'Applicants \n' + applicant.name + '\n' + applicant.phone, buttons.browse_applicants)
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, ui_messages['applicants']+'\n' + applicant.name + '\n' + applicant.phone, {reply_markup:buttons.browse_applicants.reply_markup, parse_mode: 'markdown'}).then()
             db.setApplicantPage(ctx, index, page - 1, null)
         } else {
             let applicant = db.getApplicant(ctx, applicants[page])
-            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, 'Applicants \n' + applicant.name + '\n' + applicant.phone + '\n' + 'No previous page', buttons.browse_applicants)
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, ui_messages['applicants']+'\n' + applicant.name + '\n' + applicant.phone + '\n' + ui_messages['no_previous_page'], {reply_markup:buttons.browse_applicants.reply_markup, parse_mode: 'markdown'}).then()
         }
     } else if (action === 'next_app') {
 
@@ -257,11 +414,11 @@ app.on('callback_query', (ctx) => {
         const msg = ctx.update.callback_query.message
         if (page + 1 < applicants.length) {
             let applicant = db.getApplicant(ctx, applicants[page + 1])
-            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, 'Applicants \n' + applicant.name + '\n' + applicant.phone, buttons.browse_applicants)
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, ui_messages['applicants']+'\n' + applicant.name + '\n' + applicant.phone, {reply_markup: buttons.browse_applicants.reply_markup, parse_mode: 'markdown'}).then()
             db.setApplicantPage(ctx, index, page + 1, null)
         } else {
             let applicant = db.getApplicant(ctx, applicants[page])
-            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, 'Applicants \n' + applicant.name + '\n' + applicant.phone + '\n' + 'No next page', buttons.browse_applicants)
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, ui_messages['applicants']+'\n' + applicant.name + '\n' + applicant.phone + '\n' + ui_messages['no_next_page'], {reply_markup: buttons.browse_applicants.reply_markup, parse_mode: 'markdown'}).then()
         }
     } else if (action === 'get_cv') {
         let index = db.findEmployer(ctx, ctx.from.id)
@@ -272,24 +429,30 @@ app.on('callback_query', (ctx) => {
         if (emp.cv != '') {
             ctx.telegram.sendDocument(msg.chat.id, emp.cv)
         } else {
-            ctx.reply('Applicant has not uploaded CV')
+            ctx.reply(ui_messages['no_applicant_cv'], {parse_mode: 'markdown'})
         }
     } else if (action === 'edit_employer_profile') {
         let index = db.findEmployer(ctx, ctx.from.id)
-        ctx.reply('Profile Edit\nPlease Enter your Organization\'s name', buttons.cancel_employer)
+        ctx.reply(ui_messages['employer_profile_edit'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
         db.setCommandEmployer(ctx, index, 'name_employer', null)
     } else if (action === 'cancel_employer') {
         let index = db.findEmployer(ctx, ctx.from.id)
-        ctx.reply('Operation Canceled')
+        ctx.reply(ui_messages['employer_cancel', {parse_mode: 'markdown'}])
         employerAction(ctx)
     }
 
-    // admin account --------------------------------------
+    // admin account ---------------------------------------------------- ADMIN
     else if (action === 'login') {
         let user = db.getUser(ctx);
 
-        ctx.reply('Enter Your Password', buttons.cancel_)
+        ctx.reply('Technical: Enter Your Password', buttons.cancel_)
         db.setCommandUser(ctx, user.index, 'password')
+
+    } else if (action === 'login_operations') {
+        let user = db.getUser(ctx);
+
+        ctx.reply('Operations: Enter Your Password', buttons.cancel_)
+        db.setCommandUser(ctx, user.index, 'password_operations')
 
     } else if (action === 'admin_pending') {
         // ------------------------------------------------- Pending
@@ -313,7 +476,7 @@ app.on('callback_query', (ctx) => {
             db.setPendingJobPageAdmin(ctx, user.index, page - 1, null)
         } else if (page == 0) {
             app.telegram.editMessageText(msg.chat.id, msg.message_id, null, jobs[page].title + '\nNo Previous Page', buttons.browse_pending_jobs)
-                // db.setPendingJobPageAdmin(ctx, user.index , page , null)
+            // db.setPendingJobPageAdmin(ctx, user.index , page , null)
         }
 
     } else if (action === 'next_pending') {
@@ -337,12 +500,12 @@ app.on('callback_query', (ctx) => {
         if (jobs.length > page) {
             db.acceptJob(ctx, job.id)
             ctx.reply(job.title + ' Job Accepted!')
-                // post the job to the channel here
+            // post the job to the channel here
             let message = ctx.telegram.sendMessage(channel_id, 'Title: ' + job.title + '\nJob Description: ' + job.description, buttons.apply_for_job(job.id))
-            message.then(function(result) {
+            message.then(function (result) {
                 db.setJobChannelMessage(ctx, job.id, result.message_id)
             });
-            job.chatId ? ctx.telegram.sendMessage(job.chatId, 'Congrats! your job ' + job.title + ' has been posted.').then() : false
+            job.chatId ? ctx.telegram.sendMessage(job.chatId, 'Congrats! your job has been posted. \n' + job.title).then() : false
             let jobs = db.getPendingJobsAdmin(ctx)
             if (jobs.length > page)
                 db.setPendingJobPageAdmin(ctx, user.index, page, jobs)
@@ -356,13 +519,13 @@ app.on('callback_query', (ctx) => {
         let jobs = ctx[property + 'DB'].get('users').value()[user.index].pendingJobs
         let page = ctx[property + 'DB'].get('users').value()[user.index].jobsPendingPage
         const msg = ctx.update.callback_query.message
-
+        let job = jobs[page]
         if (jobs.length > page) {
-            db.closeJobAdmin(ctx, jobs[page].id)
+            db.closeJobAdmin(ctx, job.id)
             let user = db.getUser(ctx)
-            ctx.reply(jobs[page].title + ' Job Rejected!', buttons.reject_job_reason)
+            ctx.reply(job.title + ' Job Rejected!', buttons.reject_job_reason)
 
-            jobs[page].chatId ? ctx.telegram.sendMessage(jobs[page].chatId, 'Unfortunately your job ' + jobs[page].title + ' could not be posted.').then() : false
+            job.chatId ? ctx.telegram.sendMessage(job.chatId, 'Unfortunately your job could not be posted.' + job.title).then() : false
             let jobs = db.getPendingJobsAdmin(ctx)
             if (jobs.length > page)
                 db.setPendingJobPageAdmin(ctx, user.index, page, jobs)
@@ -373,23 +536,27 @@ app.on('callback_query', (ctx) => {
     } else if (action === 'reject_reason') {
 
         let user = db.getUser(ctx)
-        let jobs = ctx[property + 'DB'].get('users').value()[user.index].pendingJobs
-        let page = ctx[property + 'DB'].get('users').value()[user.index].jobsPendingPage
-        const msg = ctx.update.callback_query.message
+        let reasons = ctx[property + 'DB'].get('adminReplies').value()
+        ctx.reply(user.rejectedJob.title + 'What is your reason for declining the job?', buttons.reject_reason_buttons(reasons))
+        db.setCommandUser(ctx, user.index, 'reject_reason_send')
 
-        if (jobs.length > page) {
-            db.closeJobAdmin(ctx, jobs[page].id)
-            let user = db.getUser(ctx)
-            ctx.reply(jobs[page].title + 'What is your reason for declining the job?', buttons.cancel_admin)
-            db.setCommandUser(ctx, user.index, 'reject_reason_send')
-        }
 
     } else if (action === 'admin_posted') {
         // ----------------------------------------------------- Posted
         let user = db.getUser(ctx);
         let jobs = db.getPostedJobs(ctx)
         if (jobs.length > 0) {
-            ctx.reply('Posted Jobs\n' + jobs[0].title + '.\n Applicants - ' + jobs[0].applicants.length, buttons.browse_active_jobs)
+            ctx.reply('Active Jobs\n' + jobs[0].title + '.\n Applicants - ' + jobs[0].applicants.length, buttons.browse_active_jobs)
+            db.setPostingJobPageAdmin(ctx, user.index, 0, jobs)
+        } else {
+            ctx.reply('No posted jobs :(\n', buttons.admin)
+        }
+    } else if (action === 'admin_closed') {
+        // ----------------------------------------------------- Closed
+        let user = db.getUser(ctx);
+        let jobs = db.getClosedJobs(ctx)
+        if (jobs.length > 0) {
+            ctx.reply('Closed Jobs\n' + jobs[0].title + '.\n Applicants - ' + jobs[0].applicants.length, buttons.browse_closed_jobs)
             db.setPostingJobPageAdmin(ctx, user.index, 0, jobs)
         } else {
             ctx.reply('No posted jobs :(\n', buttons.admin)
@@ -429,7 +596,7 @@ app.on('callback_query', (ctx) => {
             db.closeJob(ctx, jobs[page].id)
             ctx.reply(jobs[page].title + ' Job Closed!')
             if (jobs[page].reviewed)
-                app.telegram.editMessageText(264335782, jobs[page].message_id, null, jobs[page].title + '\nThis Job is Closed!')
+                app.telegram.editMessageText(channel_chat_id, jobs[page].message_id, null, jobs[page].title + '\nThis Job is Closed!')
             let jobs = db.getPostedJobs(ctx)
             if (jobs.length > page)
                 db.setPostingJobPageAdmin(ctx, user.index, page, jobs)
@@ -446,6 +613,168 @@ app.on('callback_query', (ctx) => {
 
         ctx.reply('Job Details: \n' + jobs[page].title + '\n' + jobs[page].description)
 
+    } else if (action === 'customize_messages') {
+
+        let user = db.getUser(ctx);
+        if (user.type != 'admin'){
+            return
+        }
+        let messages_ui = ctx[property + 'DB'].get('customMessages').value()[0]
+        let message_titles = Object.keys(messages_ui)
+        if (message_titles.length > 0) {
+            ctx.reply('Bot Messages:\n' + message_titles[0] + '\n' + messages_ui[message_titles[0]], {reply_markup: buttons.custom_options.reply_markup, parse_mode: 'markdown'})
+            db.setMessagesPageAdmin(ctx, user.index, 0)
+        } else {
+            ctx.reply('No Bot Messages :(\n', buttons.admin)
+        }
+
+    } else if (action === 'previous_message') {
+
+        let user = db.getUser(ctx);
+        let messages_ui = ctx[property + 'DB'].get('customMessages').value()[0]
+        let message_titles = Object.keys(messages_ui)
+        let page = user.messagePage
+        const msg = ctx.update.callback_query.message
+        if (page > 0) {
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null,'Bot Messages:\n' + message_titles[page-1].replace(/_/g, ' ') + '\n' + messages_ui[message_titles[page-1]], {reply_markup: buttons.custom_options.reply_markup, parse_mode: 'markdown'}).then()
+            db.setMessagesPageAdmin(ctx, user.index, page-1)
+        } else {
+            ctx.reply('No Previous Message :(')
+        }
+
+    } else if (action === 'next_message') {
+
+        let user = db.getUser(ctx);
+        let messages_ui = ctx[property + 'DB'].get('customMessages').value()[0]
+        let message_titles = Object.keys(messages_ui)
+        let page = user.messagePage
+        const msg = ctx.update.callback_query.message
+
+        if (page + 1 < message_titles.length) {
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null,'Bot Messages:\n' + message_titles[page+1].replace(/_/g, ' ') + '\n' +  messages_ui[message_titles[page+1]], {reply_markup: buttons.custom_options.reply_markup, parse_mode: 'markdown'}).then()
+            db.setMessagesPageAdmin(ctx, user.index, page+1)
+        } else {
+            ctx.reply('No Next Message :(')
+        }
+
+    } else if (action === 'edit_message') {
+
+        let user = db.getUser(ctx);
+        let messages_ui = ctx[property + 'DB'].get('customMessages').value()[0]
+        let message_titles = Object.keys(messages_ui)
+        let page = user.messagePage
+        
+        ctx.reply('Edit Message \n' + message_titles[page] + '\n' +  messages_ui[message_titles[page]], {reply_markup: buttons.cancel_admin.reply_markup, parse_mode: 'markdown'})
+        db.setCommandUser(ctx, user.index, 'edit_message')
+        
+
+    } else if (action === 'new_feedbacks') {
+
+        let user = db.getUser(ctx);
+        let feedbacks = db.getNewFeedbacks(ctx)
+        if (feedbacks.length > 0) {
+            ctx.reply('New Feedbacks:\n' + feedbacks[0].feedback, {reply_markup: buttons.feedback_options.reply_markup, parse_mode: 'markdown'})
+            db.setFeedbackPageAdmin(ctx, user.index, 0, feedbacks)
+        } else {
+            ctx.reply('No feedbacks :(\n', buttons.admin_operations)
+        }
+
+    } else if (action === 'feedbacks') {
+
+        let user = db.getUser(ctx);
+        let feedbacks = ctx[property + 'DB'].get('feedbacks').value()
+        if (feedbacks.length > 0) {
+            ctx.reply('Feedbacks:\n' + feedbacks[0].feedback, {reply_markup: buttons.feedback_options.reply_markup, parse_mode: 'markdown'})
+            db.setFeedbackPageAdmin(ctx, user.index, 0, feedbacks)
+        } else {
+            ctx.reply('No feedbacks :(\n', buttons.admin_operations)
+        }
+
+    } else if (action === 'previous_feedback') {
+
+        let user = db.getUser(ctx);
+        let feedbacks = db.getNewFeedbacks(ctx)
+        let page = user.feedbackPage
+        const msg = ctx.update.callback_query.message
+        if (page > 0) {
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null,'Feedbacks:\n' + feedbacks[page - 1].feedback, {reply_markup: buttons.feedback_options.reply_markup, parse_mode: 'markdown'}).then()
+            db.setFeedbackPageAdmin(ctx, user.index, page-1, null)
+        } else {
+            ctx.reply('No Previous Feedback :(')
+        }
+
+    } else if (action === 'next_feedback') {
+        
+        let user = db.getUser(ctx);
+        let feedbacks = db.getNewFeedbacks(ctx)
+        let page = user.feedbackPage
+        const msg = ctx.update.callback_query.message
+        if (page + 1 < feedbacks.length) {
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null,'Feedbacks:\n' + feedbacks[page + 1].feedback, {reply_markup: buttons.feedback_options.reply_markup, parse_mode: 'markdown'}).then()
+            db.setFeedbackPageAdmin(ctx, user.index, page+1, null)
+        } else {
+            ctx.reply('No Next Feedback :(')
+        }
+
+    } else if (action === 'mark_as_read') {
+        
+        let user = db.getUser(ctx);
+        let feedbacks = db.getNewFeedbacks(ctx)
+        let page = user.feedbackPage
+        db.markFeedbackRead(ctx, feedbacks[page].id)
+        ctx.reply('*Marked as read!*', {parse_mode: 'markdown'})
+        
+
+    } else if (action === 'automatic_replies') {
+
+        let user = db.getUser(ctx);
+        let replies = db.getAdminReplies(ctx)
+        if (replies.length > 0) {
+            ctx.reply('Automated Replies\n' + replies[0], buttons.manage_replies)
+            db.setReplyPageAdmin(ctx, user.index, 0)
+        } else {
+            ctx.reply('No Automated Replies :(\n', buttons.add_replies)
+        }
+
+    } else if (action === 'previous_reply') {
+
+        let user = db.getUser(ctx);
+        let replies = db.getAdminReplies(ctx)
+        const msg = ctx.update.callback_query.message
+        if (user.replyPage > 0) {
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null,'Automated Replies\n' + replies[user.replyPage - 1], buttons.manage_replies).then()
+            db.setReplyPageAdmin(ctx, user.index, user.replyPage - 1)
+        } else {
+            ctx.reply('No previous reply')
+        }
+
+    } else if (action === 'next_reply') {
+
+        let user = db.getUser(ctx);
+        let replies = db.getAdminReplies(ctx)
+        const msg = ctx.update.callback_query.message
+        if (user.replyPage + 1< replies.length) {
+            app.telegram.editMessageText(msg.chat.id, msg.message_id, null, 'Automated Replies\n' + replies[user.replyPage + 1], buttons.manage_replies).then()
+            db.setReplyPageAdmin(ctx, user.index, user.replyPage + 1)
+        } else {
+            ctx.reply('No next reply')
+        }
+
+    } else if (action === 'delete_reply') {
+
+        let user = db.getUser(ctx);
+        let replies = db.getAdminReplies(ctx)
+        db.deleteAdminReplies(ctx, replies[user.replyPage])
+        ctx.reply('Automated Reply Deleted: \n' + replies[user.replyPage])
+        
+
+    } else if (action === 'add_reply') {
+
+        let user = db.getUser(ctx);
+        db.setCommandUser(ctx, user.index, 'new_reply')
+        ctx.reply('Enter your reply', buttons.cancel_admin)
+        
+
     } else if (action === 'cancel_admin') {
         ctx.reply('Operation Canceled', buttons.admin)
     }
@@ -455,36 +784,230 @@ app.on('callback_query', (ctx) => {
 
 app.on('text', (ctx) => {
     var user = db.getUser(ctx);
-
     // ctx.telegram.sendMessage(channel_id, JSON.stringify(ctx.update.message))
+    if (ctx.update.message.text == ''){
+        return
+    }
+    if (ctx.update.message.text == 'Job Seeker') {
+        ctx.update.callback_query = ctx.update
+        jobSeekerAction(ctx)
+        return
+    } else if (ctx.update.message.text == 'Employer') {
+        ctx.update.callback_query = ctx.update
+        employerAction(ctx)
+        return
+    } else if (ctx.update.message.text == 'Applied Jobs') {
+        let index = db.findIndex(ctx, ctx.from.id)
+        let jobs = db.getEmployee(ctx, index).appliedJobs
+        if (jobs.length > 0) {
+            let job = db.getJob(ctx, jobs[0])
+            let status = job.closed ? '\n *This job is Closed.*' : '\n'
+            ctx.reply('Applied Jobs\n' + job.title + status, buttons.browse_applied_jobs)
+            db.setAppliedPageEmp(ctx, index, 0)
+
+        } else {
+            ctx.reply(ui_messages['employee_no_applied_jobs'], {parse_mode: 'markdown'})
+            // jobSeekerAction(ctx)
+        }
+        return
+    } else if (ctx.update.message.text == 'View Profile') {
+        let index = db.findIndex(ctx, ctx.from.id)
+
+        let emp = db.getEmployee(ctx, index)
+        ctx.reply('*Name: *' + emp.name + '\n*Email and Phone: *' + emp.email + ', ' + emp.phone, {parse_mode: 'markdown'})
+        return
+    } else if (ctx.update.message.text == 'Edit Profile') {
+        let index = db.findIndex(ctx, ctx.from.id)
+        ctx.reply(ui_messages['employee_edit'], {reply_markup: buttons.cancel_emp.reply_markup, parse_mode:'markdown'})
+        db.setCommand(ctx, index, 'name')
+        return
+    } else if (ctx.update.message.text == 'Post a Job') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        ctx.reply(ui_messages['new_job_title'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
+        db.setCommandEmployer(ctx, index, 'new_job_title', null)
+        return
+    } else if (ctx.update.message.text == 'Pending Jobs') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        let jobs = db.getActiveJobs(ctx, 'pending')
+
+        if (jobs.length > 0) {
+            let status = jobs[0].reviewed ? '\n' + ui_messages['job_is_posted'] + jobs[0].applicants.length : '\n' + ui_messages['job_is_being_reviewed']
+            ctx.reply(ui_messages['pending_jobs']+'\n' + jobs[0].title + status, {reply_markup: buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'}).then()
+            db.setJobPage(ctx, index, 0, jobs)
+        } else {
+            ctx.reply(ui_messages['no_pending_jobs'], {parse_mode: 'markdown'})
+        }
+        return
+    } else if (ctx.update.message.text == 'Active Jobs') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        let jobs = db.getActiveJobs(ctx, 'active')
+
+        if (jobs.length > 0) {
+            let status = jobs[0].reviewed ? '\n' + ui_messages['job_is_posted'] + jobs[0].applicants.length : '\n' + ui_messages['job_is_being_reviewed']
+            ctx.reply( ui_messages['active_jobs'] +'\n' + jobs[0].title + status, {reply_markup: buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'}).then()
+            db.setJobPage(ctx, index, 0, jobs)
+        } else {
+            ctx.reply(ui_messages['no_active_jobs'], {parse_mode: 'markdown'})
+        }
+        return
+    } else if (ctx.update.message.text == 'Closed Jobs') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        let jobs = db.getActiveJobs(ctx, 'closed')
+
+        if (jobs.length > 0) {
+            ctx.reply( ui_messages['closed_jobs'] + '\n' + jobs[0].title, {reply_markup: buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'}).then()
+            db.setJobPage(ctx, index, 0, jobs)
+        } else {
+            ctx.reply(ui_messages['no_closed_jobs'], {parse_mode: 'markdown'})
+        }
+        return
+    } else if (ctx.update.message.text == 'Edit Profile.') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        ctx.reply(ui_messages['employer_profile_edit'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
+        db.setCommandEmployer(ctx, index, 'name_employer', null)
+        return
+    } else if (ctx.update.message.text == 'Pending Jobs Admin') {
+        let user = db.getUser(ctx);
+        let jobs = db.getPendingJobsAdmin(ctx)
+        if (jobs.length > 0) {
+            ctx.reply('Pending Jobs\n' + jobs[0].title, buttons.browse_pending_jobs)
+            db.setPendingJobPageAdmin(ctx, user.index, 0, jobs)
+        } else {
+            ctx.reply('No active jobs with this account :(\n', buttons.admin)
+        }
+        return
+    } else if (ctx.update.message.text == 'Active Jobs Admin') {
+        let user = db.getUser(ctx);
+        let jobs = db.getPostedJobs(ctx)
+        if (jobs.length > 0) {
+            ctx.reply('Active Jobs\n' + jobs[0].title + '.\n Applicants - ' + jobs[0].applicants.length, buttons.browse_active_jobs)
+            db.setPostingJobPageAdmin(ctx, user.index, 0, jobs)
+        } else {
+            ctx.reply('No posted jobs :(\n', buttons.admin)
+        }
+        return
+    } else if (ctx.update.message.text == 'Closed Jobs Admin') {
+        let user = db.getUser(ctx);
+        let jobs = db.getClosedJobs(ctx)
+        if (jobs.length > 0) {
+            ctx.reply('Closed Jobs\n' + jobs[0].title + '.\n Applicants - ' + jobs[0].applicants.length, buttons.browse_closed_jobs)
+            db.setPostingJobPageAdmin(ctx, user.index, 0, jobs)
+        } else {
+            ctx.reply('No posted jobs :(\n', buttons.admin)
+        }
+        return
+    } else if (ctx.update.message.text == 'Automated Replies') {
+        let user = db.getUser(ctx);
+        let replies = db.getAdminReplies(ctx)
+        if (replies.length > 0) {
+            ctx.reply('Automated Replies\n' + replies[0], buttons.manage_replies)
+            db.setReplyPageAdmin(ctx, user.index, 0)
+        } else {
+            ctx.reply('No Automated Replies :(\n', buttons.add_replies)
+        }
+        return
+    } else if (ctx.update.message.text == 'Customize Messages') {
+        let user = db.getUser(ctx);
+        if (user.type != 'admin'){
+            return
+        }
+        let messages_ui = ctx[property + 'DB'].get('customMessages').value()[0]
+        let message_titles = Object.keys(messages_ui)
+        if (message_titles.length > 0) {
+            ctx.reply('Bot Messages:\n' + message_titles[0] + '\n' + messages_ui[message_titles[0]], {reply_markup: buttons.custom_options.reply_markup, parse_mode: 'markdown'})
+            db.setMessagesPageAdmin(ctx, user.index, 0)
+        } else {
+            ctx.reply('No Bot Messages :(\n', buttons.admin)
+        }
+        return
+    } else if (ctx.update.message.text == 'Feedback') {
+        let user = db.getUser(ctx);
+        if (user) {
+            db.setCommandUser(ctx, user.index, 'feedback')
+            ctx.telegram.sendMessage(
+                ctx.from.id,
+                ui_messages['feedback'], {parse_mode: 'markdown'})
+        }
+        else {
+            ctx.telegram.sendMessage(
+                ctx.from.id,
+                ui_messages['feedback_negative'], {reply_markup:buttons.welcome.reply_markup, parse_mode: 'markdown'})
+
+        }
+        return
+    } else if (ctx.update.message.text == 'New Feedbacks') {
+        let user = db.getUser(ctx);
+        let feedbacks = db.getNewFeedbacks(ctx)
+        if (feedbacks.length > 0) {
+            ctx.reply('New Feedbacks:\n' + feedbacks[0].feedback, {reply_markup: buttons.feedback_options.reply_markup, parse_mode: 'markdown'})
+            db.setFeedbackPageAdmin(ctx, user.index, 0, feedbacks)
+        } else {
+            ctx.reply('No feedbacks :(\n', buttons.admin_operations)
+        }
+        return
+    } else if (ctx.update.message.text == 'All Feedbacks') {
+        let user = db.getUser(ctx);
+        let feedbacks = ctx[property + 'DB'].get('feedbacks').value()
+        if (feedbacks.length > 0) {
+            ctx.reply('Feedbacks:\n' + feedbacks[0].feedback, {reply_markup: buttons.feedback_options.reply_markup, parse_mode: 'markdown'})
+            db.setFeedbackPageAdmin(ctx, user.index, 0, feedbacks)
+        } else {
+            ctx.reply('No feedbacks :(\n', buttons.admin_operations)
+        }
+        return
+    }
 
     let user_type = null;
     let index = null;
     let command = null;
 
     if (user == null) {
-        ctx.reply("Welcome new user! use /start to register.");
+        ctx.reply( ui_messages['new_user'], {parse_mode: 'markdown'});
+        return
     } else {
         user_type = user.type;
         index = user.index
+        command = ctx[property + 'DB'].get('users').value()[index].command;
+        if(command == 'feedback'){
+            let feedback = {}
+            feedback.id = ctx.from.id + Date.now()
+            feedback.userid = ctx.from.id
+            feedback.read = false
+            feedback.feedback = ctx.update.message.text
+            db.saveFeedback(ctx, feedback)
+            ctx.reply('*Thank you for your feedback!*', {parse_mode: 'markdown'})
+            db.setCommandUser(ctx, index, '')
+            return
+        }
     }
-    
-    
-    
+
+
+
 
     switch (user_type) {
         case null:
             {
                 index = index
                 if (index == null) {
-                    ctx.reply("I don't know you.");
+                    ctx.reply( ui_messages['new_user'], {parse_mode: 'markdown'});
                     return
                 }
                 if (ctx[property + 'DB'].get('users').value()[index].command == 'password') {
-                    if (ctx.update.message.text == 'yesadminpass1278') {
+                    if (ctx.update.message.text == admin_pass) {
                         let user = db.getUser(ctx)
                         db.logInAdmin(ctx, user.index)
-                        ctx.reply('Welcome Admin!', buttons.admin)
+                        ctx.reply('...',keyboards.admin()).then()
+                        ctx.reply('Welcome Technical Admin!', buttons.admin)
+                    } else {
+                        ctx.reply('Wrong Password \ntry again!', buttons.login)
+                    }
+                    return
+                } else if (ctx[property + 'DB'].get('users').value()[index].command == 'password_operations') {
+                    if (ctx.update.message.text == admin_operations_pass) {
+                        let user = db.getUser(ctx)
+                        db.logInAdminOperations(ctx, user.index)
+                        ctx.reply('...',keyboards.admin_operations()).then()
+                        ctx.reply('Welcome Operations Admin!', buttons.admin_operations)
                     } else {
                         ctx.reply('Wrong Password \ntry again!', buttons.login)
                     }
@@ -493,8 +1016,8 @@ app.on('text', (ctx) => {
 
                 ctx.telegram.sendMessage(
                     ctx.from.id,
-                    'Welcome to the Yes.et job bot! \nRight Fit. Right Now. \n Are you an Employer or a Job Seeker?',
-                    buttons.welcome)
+                    ui_messages['welcome_message_user'],
+                    {reply_markup:buttons.welcome.reply_markup, parse_mode: 'markdown'})
 
                 break
             }
@@ -502,39 +1025,50 @@ app.on('text', (ctx) => {
             {
                 index = db.findEmployer(ctx, ctx.from.id)
                 if (index == null) {
-                    ctx.reply("Command unrecognized! Please select options from the Menu");
+                    ctx.reply(ui_messages['unknown_command'], {parse_mode: 'markdown'});
                     return
                 }
                 command = ctx[property + 'DB'].get('employers').value()[index].command;
                 switch (command) {
                     case 'name_employer':
                         {
-                            ctx.reply("Welcome " + ctx.update.message.text + "\nEnter Phone Number\n ", buttons.cancel_employer);
+                            
+                            ctx.reply('...',keyboards.employer()).then()
+                            ctx.reply("Welcome " + ctx.update.message.text + "\n" + ui_messages['employer_contact_info'], {reply_markup: buttons.email_or_phone.reply_markup, parse_mode: 'markdown'});
                             db.setNameEmployer(ctx, index, ctx.update.message.text)
                             index = db.findEmployer(ctx, ctx.from.id)
-                            db.setCommandEmployer(ctx, index, 'phone_employer', null)
+                            db.setCommandEmployer(ctx, index, '', null)
                             break
                         }
                     case 'phone_employer':
                         {
-                            ctx.reply(" Your phone number is " + ctx.update.message.text + "\n Enter Email address", buttons.cancel_employer);
-                            db.setPhoneEmployer(ctx, index, ctx.update.message.text)
-                            index = db.findEmployer(ctx, ctx.from.id)
-                            db.setCommandEmployer(ctx, index, 'email_employer', null)
+                            if (phoneRegExp.test(ctx.update.message.text)) {
+                                ctx.reply("Your phone number is *" + ctx.update.message.text + "*\n*Thank you for Registering!*", { reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown' });
+                                db.setPhoneEmployer(ctx, index, ctx.update.message.text)
+                                index = db.findEmployer(ctx, ctx.from.id)
+                                db.setCommandEmployer(ctx, index, '', null)
+                                employerAction(ctx)
+                            } else {
+                                ctx.reply(ui_messages['invalid_phone'], {parse_mode: 'markdown'})
+                            }
                             break
                         }
                     case 'email_employer':
                         {
-                            ctx.reply(" Your Email is " + ctx.update.message.text + "\nThank you for Registering!");
-                            db.setEmailEmployer(ctx, index, ctx.update.message.text)
-                            index = db.findEmployer(ctx, ctx.from.id)
-                            db.setCommandEmployer(ctx, index, '', null)
-                            employerAction(ctx)
+                            if (emailRegexp.test(ctx.update.message.text)) {
+                                ctx.reply("Your email is *" + ctx.update.message.text + "*\n*Thank you for Registering!*", { inline_keyboard: buttons.cancel_employer, parse_mode: 'markdown' });
+                                db.setEmailEmployer(ctx, index, ctx.update.message.text)
+                                index = db.findEmployer(ctx, ctx.from.id)
+                                db.setCommandEmployer(ctx, index, '', null)
+                                employerAction(ctx)
+                            } else {
+                                ctx.reply(ui_messages['invalid_email'], {parse_mode: 'markdown'})
+                            }
                             break
                         }
                     case 'new_job_title':
                         {
-                            ctx.reply("Job Title: " + ctx.update.message.text + "\nEnter Job Description");
+                            ctx.reply("Job Title: *" + ctx.update.message.text + "*\n" + ui_messages['job_description']);
                             let job = {
                                 id: -1,
                                 command: '',
@@ -551,6 +1085,7 @@ app.on('text', (ctx) => {
                             job.edited = false
                             job.title = ctx.update.message.text
                             job.applicants = []
+                            job.date = new Date()
                             job.chatId = ctx.update.message.chat.id
                             ctx[property + 'DB'].get('jobs').push(job).write()
                             index = db.findEmployer(ctx, ctx.from.id)
@@ -559,17 +1094,27 @@ app.on('text', (ctx) => {
                         }
                     case 'job_description':
                         {
-                            ctx.reply("Description: " + ctx.update.message.text + "\nJob Successfully Added!\nYour job will be reviewed an posted. We will notify you as soon as we can :) - Yes Team");
+                            ctx.reply("Description: " + ctx.update.message.text + "\n" + ui_messages['job_successfully_added'], {reply_markup: buttons.screening_question.reply_markup, parse_mode: 'markdown'});
                             index = db.findEmployer(ctx, ctx.from.id)
                             db.setJobDescription(ctx, ctx[property + 'DB'].get('employers').value()[index].jobid, ctx.update.message.text)
                             index = db.findEmployer(ctx, ctx.from.id)
                             db.setCommandEmployer(ctx, index, '', null)
-                            employerAction(ctx)
+                            // employerAction(ctx)
+                            break
+                        }
+                    case 'pre-screening':
+                        {
+                            ctx.reply("Pre-screeing Question: \n*" + ctx.update.message.text + "*\n" + ui_messages['pre_screening_question_added']);
+                            index = db.findEmployer(ctx, ctx.from.id)
+                            db.setJobScreeiningQuestion(ctx, ctx[property + 'DB'].get('employers').value()[index].jobid, ctx.update.message.text)
+                            index = db.findEmployer(ctx, ctx.from.id)
+                            db.setCommandEmployer(ctx, index, '', null)
+                            // employerAction(ctx)
                             break
                         }
                     case 'edit_job_title':
                         {
-                            ctx.reply("Job Title: " + ctx.update.message.text + "\nEnter Job Description", buttons.cancel_employer);
+                            ctx.reply("Job Title: *" + ctx.update.message.text + "\n*" + ui_messages['job_description'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'});
                             let page = ctx[property + 'DB'].get('employers').value()[index].jobsPage
                             let jobid = ctx[property + 'DB'].get('employers').value()[index].jobs[page].id
                             db.setJobName(ctx, jobid, ctx.update.message.text)
@@ -578,15 +1123,16 @@ app.on('text', (ctx) => {
                         }
                     case 'job_description_edit':
                         {
-                            ctx.reply("Description: " + ctx.update.message.text + "\nJob Successfully Added!\nYour job will be reviewed an posted. We will notify you as soon as we can :) - Yes Team");
+                            ctx.reply("Description: " + ctx.update.message.text + "\n" + ui_messages['job_successfully_edited'], {reply_markup: buttons.screening_question.reply_markup, parse_mode: 'markdown'});
                             let page = ctx[property + 'DB'].get('employers').value()[index].jobsPage
                             let jobid = ctx[property + 'DB'].get('employers').value()[index].jobs[page].id
                             db.setJobDescription(ctx, jobid, ctx.update.message.text)
                             index = db.findEmployer(ctx, ctx.from.id)
                             db.setCommandEmployer(ctx, index, '', null)
-                            employerAction(ctx)
+                            // employerAction(ctx)
                             break
                         }
+
                 }
                 break
             }
@@ -594,14 +1140,16 @@ app.on('text', (ctx) => {
             {
                 index = db.findIndex(ctx, ctx.from.id)
                 if (index == null) {
-                    ctx.reply("Command unrecognized! Please select options from the Menu");
+                    ctx.reply(ui_messages['unknown_command'], {parse_mode: 'markdown'});
                     return
                 }
                 command = ctx[property + 'DB'].get('employees').value()[index].command;
                 switch (command) {
                     case 'name':
-                        {
-                            ctx.reply("Hello " + ctx.update.message.text + "\nEnter your phone number", buttons.cancel_emp);
+                        {  
+                            
+                            ctx.reply('...',keyboards.job_seeker()).then()
+                            ctx.reply(ui_messages['employee_new_greeting'] + ctx.update.message.text + "\n" + ui_messages['employee_phone'], {reply_markup: buttons.cancel_emp.reply_markup, parse_mode: 'markdown'});
                             db.setName(ctx, index, ctx.update.message.text)
                             index = db.findIndex(ctx, ctx.from.id)
                             db.setCommand(ctx, index, 'phone')
@@ -609,18 +1157,26 @@ app.on('text', (ctx) => {
                         }
                     case 'phone':
                         {
-                            ctx.reply(" Your phone number is " + ctx.update.message.text + "\n Enter your Email please", buttons.cancel_emp);
-                            db.setPhone(ctx, index, ctx.update.message.text)
-                            index = db.findIndex(ctx, ctx.from.id)
-                            db.setCommand(ctx, index, 'email')
+                            if (phoneRegExp.test(ctx.update.message.text)) {
+                                ctx.reply("Your phone number is *" + ctx.update.message.text + "*\n" + ui_messages['employee_email'], {reply_markup: buttons.cancel_emp.reply_markup, parse_mode: 'markdown'});
+                                db.setPhone(ctx, index, ctx.update.message.text)
+                                index = db.findIndex(ctx, ctx.from.id)
+                                db.setCommand(ctx, index, 'email')
+                            } else {
+                                ctx.reply(ui_messages['invalid_phone'], {parse_mode: 'markdown'})
+                            }
                             break
                         }
                     case 'email':
                         {
-                            ctx.reply(" Your Email is " + ctx.update.message.text + "\n Upload your CV in PDF format", buttons.cancel_emp);
-                            db.setEmail(ctx, index, ctx.update.message.text)
-                            index = db.findIndex(ctx, ctx.from.id)
-                            db.setCommand(ctx, index, 'file')
+                            if (emailRegexp.test(ctx.update.message.text)) {
+                                ctx.reply("Your Email is *" + ctx.update.message.text + "*\n Upload your CV as a file", {reply_markup: buttons.cancel_emp.reply_markup, parse_mode: 'markdown'});
+                                db.setEmail(ctx, index, ctx.update.message.text)
+                                index = db.findIndex(ctx, ctx.from.id)
+                                db.setCommand(ctx, index, 'file')
+                            } else {
+                                ctx.reply(ui_messages['invalid_email'], {parse_mode: 'markdown'})
+                            }
                             break
                         }
                 }
@@ -629,17 +1185,40 @@ app.on('text', (ctx) => {
         case 'admin':
             {
                 if (ctx[property + 'DB'].get('users').value()[index].command == 'reject_reason_send') {
-                    let jobs = ctx[property + 'DB'].get('users').value()[user.index].pendingJobs
-                    let page = ctx[property + 'DB'].get('users').value()[user.index].jobsPendingPage
-                    jobs[page].chatId ? ctx.telegram.sendMessage(jobs[page].chatId, 'Your job ' + jobs[page].title + ' was rejected because \n' + ctx.update.message.text).then() : false
+                    let user = db.getUser(ctx)
+                    user.rejectedJob.chatId ? ctx.telegram.sendMessage(user.rejectedJob.chatId, 'Your job ' + user.rejectedJob.title + ' was rejected because \n' + ctx.update.message.text).then() : false
                     ctx.reply('Reason Sent!', buttons.admin)
+                    ctx.reply('...',keyboards.admin()).then()
+                } else if (ctx[property + 'DB'].get('users').value()[index].command == 'new_reply') {
+                    
+                    ctx[property + 'DB'].get('adminReplies').push(ctx.update.message.text).write()
+                    ctx.reply(ctx.update.message.text + '\nReply Saved!', buttons.admin)
+                } else if (ctx[property + 'DB'].get('users').value()[index].command == 'edit_message') {
+                    let user = db.getUser(ctx);
+                    let messages_ui = ctx[property + 'DB'].get('customMessages').value()[0]
+                    let message_titles = Object.keys(messages_ui)
+                    let page = user.messagePage
+
+                    db.saveMessages(ctx, message_titles[page], ctx.update.message.text)
+                    ctx.reply('*Message Edited*:\n' + message_titles[page] + '\n' +  ctx.update.message.text, {reply_markup: buttons.custom_options.reply_markup, parse_mode: 'markdown'})
+                    ui_messages =  ctx[property + 'DB'].get('customMessages').value()[0];
                 }
+                break
+            }
+        case 'admin_operations':
+            {
+                if (ctx[property + 'DB'].get('users').value()[index].command == 'reply_feedback') {
+                    let user = db.getUser(ctx)
+                    user.rejectedJob.chatId ? ctx.telegram.sendMessage(user.rejectedJob.chatId, 'Your job ' + user.rejectedJob.title + ' was rejected because \n' + ctx.update.message.text).then() : false
+                    ctx.reply('Reason Sent!', buttons.admin)
+                    ctx.reply('...',keyboards.admin()).then()
+                } 
                 break
             }
         default:
             {
                 db.resetItem(ctx, index)
-                ctx.reply("Whoa! That flew right by me");
+                ctx.reply(ui_messages['unknown_command'], {parse_mode: 'markdown'});
                 return
             }
     }
@@ -650,16 +1229,15 @@ app.on('document', (ctx) => {
     let index = db.findIndex(ctx, ctx.from.id)
     if (ctx[property + 'DB'].get('employees').value()[index].command == 'file') {
         db.setCV(ctx, index, ctx.update.message.document.file_id);
-        ctx.reply("Upload Successful \n Thank you for Registering!");
+        ctx.reply(ui_messages['employee_registration_successfull'], {parse_mode: 'markdown'});
         jobSeekerAction(ctx)
     } else {
-        ctx.reply("File could not be saved. I did not ask for a file.");
+        ctx.reply(ui_messages['file_error'], {parse_mode: 'markdown'});
     }
 });
 
 
-app.startPolling()
-
+app.launch()
 
 function jobSeekerAction(ctx) {
     let user = db.getUser(ctx);
@@ -680,21 +1258,25 @@ function jobSeekerAction(ctx) {
         user.id = ctx.from.id;
         user.userid = ctx.from.id;
         user.type = 'job_seeker'
+        user.chatId = ctx.update.callback_query.message.chat.id
         ctx[property + 'DB'].get('users').push(user).write()
     }
 
     let index = db.findIndex(ctx, ctx.from.id)
     if (index == null) {
         user.command = 'name'
+        user.appliedJobs = []
         ctx[property + 'DB'].get('employees').push(user).write()
-        ctx.reply('Please Enter your First and Last name')
+        ctx.reply(ui_messages['employee_new'], {parse_mode: 'markdown'})
         db.setCommand(ctx, index, 'name')
     } else {
+        
+        ctx.telegram.sendMessage(ctx.from.id, '...',keyboards.job_seeker()).then()
         if (ctx[property + 'DB'].get('employees').value()[index].name != '') {
-            ctx.reply('Hi ' + ctx[property + 'DB'].get('employees').value()[index].name, buttons.edit_employee_profile)
+            ctx.reply(ui_messages['employee_new_greeting'] + ctx[property + 'DB'].get('employees').value()[index].name, {reply_markup:buttons.edit_employee_profile.reply_markup, parse_mode: 'markdown'})
             db.setCommand(ctx, index, '')
         } else {
-            ctx.reply('Please Enter your First and Last name')
+            ctx.reply(ui_messages['employee_new'], {parse_mode: 'markdown'})
             db.setCommand(ctx, index, 'name')
         }
     }
@@ -719,6 +1301,7 @@ function employerAction(ctx) {
         user.id = ctx.from.id;
         user.userid = ctx.from.id;
         user.type = 'employer'
+        user.chatId = ctx.update.callback_query.message.chat.id
         ctx[property + 'DB'].get('users').push(user).write()
     }
 
@@ -728,14 +1311,16 @@ function employerAction(ctx) {
         // ctx[property + 'DB'].get('users').push(user).write()
         user.command = 'name_employer'
         ctx[property + 'DB'].get('employers').push(user).write()
-        ctx.reply('New Employer\nWhat is your Personal or Organization’s name?')
-            // db.setCommand(ctx ,index, 'name')
+        ctx.reply(ui_messages['employer_new'], {parse_mode: 'markdown'})
+        // db.setCommand(ctx ,index, 'name')
     } else if (index >= 0) {
+        
+        ctx.telegram.sendMessage(ctx.from.id, '...',keyboards.employer()).then()
         if (ctx[property + 'DB'].get('employers').value()[index].name != '') {
             ctx.reply('Welcome ' + ctx[property + 'DB'].get('employers').value()[index].name, buttons.edit_employer_profile)
             db.setCommandEmployer(ctx, index, '', null)
         } else {
-            ctx.reply('Welcome Back\nWhat is your Personal or Organization’s name?')
+            ctx.reply(ui_messages['employer_new'], {parse_mode: 'markdown'})
             db.setCommandEmployer(ctx, index, '', null)
         }
 

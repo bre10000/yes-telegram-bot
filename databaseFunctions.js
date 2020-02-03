@@ -1,5 +1,6 @@
 const property = 'data'
 let ctx
+const buttons = require('./buttons');
 
 module.exports = {
     // ----------------------------------------------------- Employee
@@ -75,6 +76,12 @@ module.exports = {
 
         return index
     },
+    setAppliedPageEmp: function(ctx, index, pageNo) {
+        let temp = ctx[property + 'DB'].get('employees').value()[index]
+        temp.applied_page = pageNo
+        ctx[property + 'DB'].get('employees').splice(index, 1).write()
+        ctx[property + 'DB'].get('employees').push(temp).write()
+    },
     // ----------------------------------------------------- User
     getUser: function(ctx) {
         let users = ctx[property + 'DB'].get('users').value()
@@ -99,6 +106,12 @@ module.exports = {
     logInAdmin: function(ctx, index) {
         let temp = ctx[property + 'DB'].get('users').value()[index]
         temp.type = 'admin'
+        ctx[property + 'DB'].get('users').splice(index, 1).write()
+        ctx[property + 'DB'].get('users').push(temp).write()
+    },
+    logInAdminOperations: function(ctx, index) {
+        let temp = ctx[property + 'DB'].get('users').value()[index]
+        temp.type = 'admin_operations'
         ctx[property + 'DB'].get('users').splice(index, 1).write()
         ctx[property + 'DB'].get('users').push(temp).write()
     },
@@ -147,7 +160,10 @@ module.exports = {
             return
         }
         temp.command = command
-        temp.jobid = id
+        console.log("ID save ", id + '  $' + command)
+        if( id != null ){
+            temp.jobid = id
+        }
         ctx[property + 'DB'].get('employers').splice(index, 1).write()
         ctx[property + 'DB'].get('employers').push(temp).write()
     },
@@ -199,6 +215,12 @@ module.exports = {
             if (ctx[property + 'DB'].get('jobs').value()[i].id == id) {
                 let job = ctx[property + 'DB'].get('jobs').value()[i]
                 job.closed = true
+                if (job.reviewed && job.applicants.length > 0){
+                    job.applicants.forEach(element => {
+                        let emp = this.getApplicant(ctx, element)
+                        ctx.telegram.sendMessage(emp.chatId, job.title + " has been closed.")
+                    });
+                }
                 ctx[property + 'DB'].get('jobs').splice(i, 1).write()
                 ctx[property + 'DB'].get('jobs').push(job).write()
             }
@@ -225,14 +247,23 @@ module.exports = {
 
         for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
             if (ctx[property + 'DB'].get('jobs').value()[i].id == id) {
+                let emp = this.getApplicant(ctx, ctx.from.id)
+
                 let job = ctx[property + 'DB'].get('jobs').value()[i]
                 let temp = true
                 for (var j = 0; j < job.applicants.length; j++) {
                     if (job.applicants[j] == ctx.from.id)
                         temp = false
                 }
-                if (temp)
+                if (temp){
                     job.applicants.push(ctx.from.id)
+                    job.chatId ? ctx.telegram.sendMessage(job.chatId, 'New Applicant \n' + emp.name + '\nPhone and Email - ' + emp.phone + ', ' + emp.email, buttons.download_applicant_cv).then() : false
+                    if(emp.appliedJobs == null)
+                        emp.appliedJobs = []
+                    emp.appliedJobs.push(id)
+                    ctx[property + 'DB'].get('employees').splice(emp.index, 1).write()
+                    ctx[property + 'DB'].get('employees').push(emp).write()
+                }
                 ctx[property + 'DB'].get('jobs').splice(i, 1).write()
                 ctx[property + 'DB'].get('jobs').push(job).write()
             }
@@ -274,6 +305,22 @@ module.exports = {
 
         return index
     },
+    setJobScreeiningQuestion: function(ctx, id, question) {
+        let index
+       console.log(question, 'Imtheid - ' + id)
+        for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
+            console.log(ctx[property + 'DB'].get('jobs').value()[i].id == id, 'askjdhasjkd - ' + ctx[property + 'DB'].get('jobs').value()[i].id)
+            if (ctx[property + 'DB'].get('jobs').value()[i].id == id) {
+                let job = ctx[property + 'DB'].get('jobs').value()[i]
+                console.log(question, 'Imtasdsdheid - ' + id + '\n the job is ' + job)
+                job.question = question
+                ctx[property + 'DB'].get('jobs').splice(i, 1).write()
+                ctx[property + 'DB'].get('jobs').push(job).write()
+            }
+        }
+
+        return index
+    },
     setJobChannelMessage: function(ctx, id, message_id) {
         let index
 
@@ -301,15 +348,31 @@ module.exports = {
 
         return index
     },
-    getActiveJobs: function(ctx) {
+    getActiveJobs: function(ctx, type) {
         let temp = []
-
-        for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
-            let job = ctx[property + 'DB'].get('jobs').value()[i]
-            if (job.userid == ctx.from.id && !job.closed) {
-                temp.push(job)
+        if (type == 'pending'){
+            for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
+                let job = ctx[property + 'DB'].get('jobs').value()[i]
+                if (job.userid == ctx.from.id && !job.closed && !job.reviewed) {
+                    temp.push(job)
+                }
+            }
+        } else if (type == 'active'){
+            for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
+                let job = ctx[property + 'DB'].get('jobs').value()[i]
+                if (job.userid == ctx.from.id && !job.closed && job.reviewed) {
+                    temp.push(job)
+                }
+            }
+        } else if (type == 'closed'){
+           for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
+                let job = ctx[property + 'DB'].get('jobs').value()[i]
+                if (job.userid == ctx.from.id && job.closed) {
+                    temp.push(job)
+                }
             }
         }
+
 
         return temp
     },
@@ -358,6 +421,18 @@ module.exports = {
 
         return temp
     },
+    getClosedJobs: function(ctx) {
+        let temp = []
+
+        for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
+            let job = ctx[property + 'DB'].get('jobs').value()[i]
+            if (job.reviewed && job.closed) {
+                temp.push(job)
+            }
+        }
+
+        return temp
+    },
     setPostingJobPageAdmin: function(ctx, index, pageNo, jobs) {
         let temp = ctx[property + 'DB'].get('users').value()[index]
         temp.jobsPostingPage = pageNo
@@ -366,5 +441,71 @@ module.exports = {
         ctx[property + 'DB'].get('users').splice(index, 1).write()
         ctx[property + 'DB'].get('users').push(temp).write()
     },
+    setReplyPageAdmin: function(ctx, index, pageNo) {
+        let temp = ctx[property + 'DB'].get('users').value()[index]
+        temp.replyPage = pageNo
+        ctx[property + 'DB'].get('users').splice(index, 1).write()
+        ctx[property + 'DB'].get('users').push(temp).write()
+    },
+    setMessagesPageAdmin: function(ctx, index, pageNo) {
+        let temp = ctx[property + 'DB'].get('users').value()[index]
+        temp.messagePage = pageNo
+        ctx[property + 'DB'].get('users').splice(index, 1).write()
+        ctx[property + 'DB'].get('users').push(temp).write()
+    },
+    setFeedbackPageAdmin: function(ctx, index, pageNo, feedbacks) {
+        let temp = ctx[property + 'DB'].get('users').value()[index]
+        temp.feedbackPage = pageNo
+        if(feedbacks != null)
+            temp.feedbacks = feedbacks
+        ctx[property + 'DB'].get('users').splice(index, 1).write()
+        ctx[property + 'DB'].get('users').push(temp).write()
+    },
+    getAdminReplies: function(ctx) {
+        return ctx[property + 'DB'].get('adminReplies').value()
+    },
+    deleteAdminReplies: function(ctx, reply) {
+        for (var i = 0; i < ctx[property + 'DB'].get('adminReplies').value().length; i++) {
+    
+            if (ctx[property + 'DB'].get('adminReplies').value()[i] == reply) {
+                ctx[property + 'DB'].get('adminReplies').splice(i, 1).write()
+            }
+        }
 
+    },
+    saveFeedback: function(ctx, feedback) {
+        ctx[property + 'DB'].get('feedbacks').push(feedback).write()
+    },
+    saveMessages: function(ctx, title, message) {
+        let messages = ctx[property + 'DB'].get('customMessages').value()[0]
+        messages[title] = message
+        ctx[property + 'DB'].get('customMessages').pop().write()
+        ctx[property + 'DB'].get('customMessages').push(messages).write()
+    },
+    getNewFeedbacks: function(ctx) {
+        let temp = []
+
+        for (var i = 0; i < ctx[property + 'DB'].get('feedbacks').value().length; i++) {
+            let feedback = ctx[property + 'DB'].get('feedbacks').value()[i]
+            if (!feedback.read) {
+                temp.push(feedback)
+            }
+        }
+
+        return temp
+    },
+    markFeedbackRead: function(ctx, id) {
+
+
+        for (var i = 0; i < ctx[property + 'DB'].get('feedbacks').value().length; i++) {
+            let feedback = ctx[property + 'DB'].get('feedbacks').value()[i]
+            if (feedback.id == id) {
+                feedback.read = true
+                ctx[property + 'DB'].get('feedbacks').splice(i, 1).write()
+                ctx[property + 'DB'].get('feedbacks').push(feedback).write()
+            }
+        }
+
+        return
+    },
 };
