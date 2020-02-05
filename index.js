@@ -12,12 +12,14 @@ const app = new Telegraf('1030576944:AAEgABxuJs3dQTTEU7EMKhgYiemx9Vw8qyI')
 const property = 'data'
 
 // Things to change
-const channel_id = "-1001394963347"; // The channel to be posted on
-const channel_chat_id = "-1001394963347"; // The channel to be posted on
+// const channel_id = "-1001394963347"; // The channel to be posted on
+const channel_id = "-1001341473286";
+const channel_chat_id = "-1001341473286"; // The channel to be posted on
 const admin_pass = "yesadminpass1278"
 const admin_operations_pass = "yesadminpass1278"
 
 // ^^^^^^^^^^^^^^^^^^^^^
+
 
 const phoneRegExp = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/im;
 const emailRegexp = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
@@ -498,6 +500,8 @@ app.on('callback_query', (ctx) => {
         const msg = ctx.update.callback_query.message
         var job = jobs[page]
         if (jobs.length > page) {
+            if(job == null)
+                return
             db.acceptJob(ctx, job.id)
             ctx.reply(job.title + ' Job Accepted!')
             // post the job to the channel here
@@ -591,12 +595,12 @@ app.on('callback_query', (ctx) => {
         let jobs = ctx[property + 'DB'].get('users').value()[user.index].postingJobs
         let page = ctx[property + 'DB'].get('users').value()[user.index].jobsPostingPage
         const msg = ctx.update.callback_query.message
-
+        let job = jobs[page]
         if (jobs.length > page) {
-            db.closeJob(ctx, jobs[page].id)
-            ctx.reply(jobs[page].title + ' Job Closed!')
-            if (jobs[page].reviewed)
-                app.telegram.editMessageText(channel_chat_id, jobs[page].message_id, null, jobs[page].title + '\nThis Job is Closed!')
+            db.closeJob(ctx, job.id)
+            ctx.reply(job.title + ' Job Closed!')
+            if (job.reviewed)
+                app.telegram.editMessageText(channel_chat_id, job.message_id, null, job.title + '\nThis Job is Closed!')
             let jobs = db.getPostedJobs(ctx)
             if (jobs.length > page)
                 db.setPostingJobPageAdmin(ctx, user.index, page, jobs)
@@ -798,6 +802,8 @@ app.on('text', (ctx) => {
         return
     } else if (ctx.update.message.text == 'Applied Jobs') {
         let index = db.findIndex(ctx, ctx.from.id)
+        if(index == null)
+            return
         let jobs = db.getEmployee(ctx, index).appliedJobs
         if (jobs.length > 0) {
             let job = db.getJob(ctx, jobs[0])
@@ -812,7 +818,8 @@ app.on('text', (ctx) => {
         return
     } else if (ctx.update.message.text == 'View Profile') {
         let index = db.findIndex(ctx, ctx.from.id)
-
+        if(index == null)
+            return
         let emp = db.getEmployee(ctx, index)
         ctx.reply('*Name: *' + emp.name + '\n*Email and Phone: *' + emp.email + ', ' + emp.phone, {parse_mode: 'markdown'})
         return
@@ -1326,3 +1333,9 @@ function employerAction(ctx) {
 
     }
 }
+
+var server_port = process.env.PORT || 80;
+var server_host = '0.0.0.0';
+server.listen(server_port, server_host, function() {
+    console.log('Listening on port %d', server_port);
+});
