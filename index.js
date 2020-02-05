@@ -1,6 +1,7 @@
 'strict mode'
 
 const Telegraf = require('telegraf')
+var express = require('express');
 
 const buttons = require('./buttons');
 const keyboards = require('./keyboards');
@@ -9,6 +10,7 @@ const db = require('./databaseFunctions');
 
 const app = new Telegraf('1030576944:AAEgABxuJs3dQTTEU7EMKhgYiemx9Vw8qyI')
 
+var server = express();
 const property = 'data'
 
 // Things to change
