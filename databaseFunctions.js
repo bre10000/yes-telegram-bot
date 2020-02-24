@@ -154,18 +154,34 @@ module.exports = {
         }
         return index
     },
+    getEmployer(ctx, index) {
+        return ctx[property + 'DB'].get('employers').value()[index]
+    },
     setCommandEmployer: function(ctx, index, command, id) {
         let temp = ctx[property + 'DB'].get('employers').value()[index]
         if (!temp) {
             return
         }
         temp.command = command
-        console.log("ID save ", id + '  $' + command)
         if( id != null ){
             temp.jobid = id
         }
         ctx[property + 'DB'].get('employers').splice(index, 1).write()
         ctx[property + 'DB'].get('employers').push(temp).write()
+    },
+    setApplicationMethodEmployer: function(ctx, id, method) {
+        let index
+
+        for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
+            if (ctx[property + 'DB'].get('jobs').value()[i].id == id) {
+                let job = ctx[property + 'DB'].get('jobs').value()[i]
+                job.application_method = method
+                ctx[property + 'DB'].get('jobs').splice(i, 1).write()
+                ctx[property + 'DB'].get('jobs').push(job).write()
+            }
+        }
+
+        return index
     },
     setApplicantEmployer: function(ctx, index, applicant) {
         let temp = ctx[property + 'DB'].get('employers').value()[index]
@@ -257,7 +273,8 @@ module.exports = {
                 }
                 if (temp){
                     job.applicants.push(ctx.from.id)
-                    job.chatId ? ctx.telegram.sendMessage(job.chatId, 'New Applicant \n' + emp.name + '\nPhone and Email - ' + emp.phone + ', ' + emp.email, buttons.download_applicant_cv).then() : false
+                    if(job.application_method == 'telegram')
+                        job.chatId ? ctx.telegram.sendMessage(job.chatId, 'New Applicant \n' + emp.name + '\nPhone and Email - ' + emp.phone + ', ' + emp.email, buttons.download_applicant_cv).then() : false
                     if(emp.appliedJobs == null)
                         emp.appliedJobs = []
                     emp.appliedJobs.push(id)
@@ -291,6 +308,20 @@ module.exports = {
 
         return index
     },
+    setJobCategory: function(ctx, id, category) {
+        let index
+
+        for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
+            if (ctx[property + 'DB'].get('jobs').value()[i].id == id) {
+                let job = ctx[property + 'DB'].get('jobs').value()[i]
+                job.category = category
+                ctx[property + 'DB'].get('jobs').splice(i, 1).write()
+                ctx[property + 'DB'].get('jobs').push(job).write()
+            }
+        }
+
+        return index
+    },
     setJobDescription: function(ctx, id, description) {
         let index
 
@@ -307,12 +338,9 @@ module.exports = {
     },
     setJobScreeiningQuestion: function(ctx, id, question) {
         let index
-       console.log(question, 'Imtheid - ' + id)
         for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
-            console.log(ctx[property + 'DB'].get('jobs').value()[i].id == id, 'askjdhasjkd - ' + ctx[property + 'DB'].get('jobs').value()[i].id)
             if (ctx[property + 'DB'].get('jobs').value()[i].id == id) {
                 let job = ctx[property + 'DB'].get('jobs').value()[i]
-                console.log(question, 'Imtasdsdheid - ' + id + '\n the job is ' + job)
                 job.question = question
                 ctx[property + 'DB'].get('jobs').splice(i, 1).write()
                 ctx[property + 'DB'].get('jobs').push(job).write()
@@ -337,7 +365,7 @@ module.exports = {
     },
     getJob: function(ctx, id) {
         let index
-
+        
         for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
             if (ctx[property + 'DB'].get('jobs').value()[i].id == id) {
                 let job = ctx[property + 'DB'].get('jobs').value()[i]
@@ -507,5 +535,18 @@ module.exports = {
         }
 
         return
+    },
+    searchJobs: function(ctx, query) {
+        query = query.toLowerCase()
+        let temp = []
+
+        for (var i = 0; i < ctx[property + 'DB'].get('jobs').value().length; i++) {
+            let job = ctx[property + 'DB'].get('jobs').value()[i]
+            if (job.reviewed && !job.closed && (job.title.toLowerCase().includes(query) || job.category.toLowerCase().includes(query))) {
+                temp.push(job)
+            }
+        }
+
+        return temp
     },
 };

@@ -14,7 +14,8 @@ module.exports = {
           deserialize: (str) => JSON.parse(str),
         },
         // We will use `messages` array in our database to store user messages using exported lowdb instance from LocalSession via Telegraf Context
-        state: { users: [], employees: [], employers: [], jobs: [], adminReplies: [], feedbacks: [],
+        state: { users: [], employees: [], employers: [], jobs: [], adminReplies: [], feedbacks: [], 
+                 categories: ['Accounting, Finance, Business', 'Creative Arts & Design', 'Engineering & Manufacturing', 'Healthcare & Pharamcuticals', 'Hospitality & Events Management', 'Information Technology', 'Sales, Marketing & PR', 'Property & Construction', 'Human Resources & Adminstration', 'Transport & Logistics'],
                  customMessages: [
                   {
                     apply_confirm_question: 'Do you want to apply for ',
@@ -54,7 +55,7 @@ module.exports = {
                     job_description: 'Enter Job Description',
                     pre_screening_question: 'Enter your pre-screening question. \n your question should have a yes or no answer',
                     pre_screening_question_added: 'Pre-Screening question added successfully',
-                    job_successfully_added: 'Job Successfully Added!\n Your job will be reviewed and posted as soon as possible. Thank you.',
+                    job_successfully_added: 'Job Successfully Added!\n Your job will be reviewed and posted, Thank you. \nChoose a method to be contacted by applicants, telegram is the default',
                     job_successfully_edited: 'Job Successfully Edited!\n Your job will be reviewed and posted as soon as possible. Thank you.',
                   
                     edit_job_title: 'Job Edit\nPlease Enter Job Title',
@@ -80,7 +81,9 @@ module.exports = {
                     
                     pending_jobs: '*Pending Jobs*',
                     active_jobs: '*Active Jobs*',
-                    closed_jobs: '*Closed Jobs*'
+                    closed_jobs: '*Closed Jobs*',
+
+                    user_logged_out: '*Bye! Hope I could Help a bit. See ya!*'
                   }
                  ]}
       })
