@@ -1525,7 +1525,7 @@ app.on('document', (ctx) => {
 });
 
 
-app.startPolling()
+app.launch()
 
 function jobSeekerAction(ctx) {
     let user = db.getUser(ctx);
