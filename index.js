@@ -8,9 +8,9 @@ const keyboards = require('./keyboards');
 const dbCon = require('./databaseConnection');
 const db = require('./databaseFunctions');
 
+
 const app = new Telegraf('1030576944:AAEgABxuJs3dQTTEU7EMKhgYiemx9Vw8qyI')
 
-var server = express();
 const property = 'data'
 
 // Things to change
@@ -48,6 +48,7 @@ app.command('start', (ctx) => {
             if (command) {
                 var job = db.getJob(ctx, command)
                 if (job == null) {
+                    ctx.reply('Job not found :(', { parse_mode: 'markdown'})
                     return
                 }
                 ctx.reply(ui_messages['apply_confirm_question'] + job.title + '?', {reply_markup:buttons.apply_emp.reply_markup, parse_mode:'markdown'})
@@ -55,6 +56,13 @@ app.command('start', (ctx) => {
                 db.setApplyJob(ctx, emp.index, job)
                 return
             }
+            else {
+                jobSeekerAction(ctx)
+                return
+            }
+        } else if (user.type == 'employer') {
+            employerAction(ctx)
+            return
         }
     }
     // **** Keyboard
@@ -125,6 +133,58 @@ app.command('admin', (ctx) => {
 app.on('callback_query', (ctx) => {
 
     const action = ctx.update.callback_query.data;
+    //--------------------------------------------------- Show Job Details with Apply Button
+    if ( action.startsWith("_showjob") ) {
+        let jobid = action.slice(8, -1)
+        jobid += action.slice(-1)
+        let job = db.getJob(ctx, jobid)
+
+        ctx.reply('Title: ' + job.title + '\nJob Description: ' + job.description, buttons.apply_for_job_search(job.id)).then()
+
+        return
+    }
+
+    if ( action.startsWith("_applyforjob") ) {
+        let jobid = action.slice(12, -1)
+        jobid += action.slice(-1)
+        let job = db.getJob(ctx, jobid)
+
+        if (job.question == null) {
+            db.applyForJob(ctx, job.id)
+            let index_employer = db.findEmployer(ctx, job.userid)
+            db.setApplicantEmployer(ctx, index_employer, ctx.from.id)
+            index_employer = db.findEmployer(ctx, job.userid)
+            let reply = '\n'
+            if(job.application_method == 'email')
+                reply += 'Send your application to: *' + ctx[property + 'DB'].get('employers').value()[index_employer].email + '*'
+            else if(job.application_method == 'phone')
+                reply += 'Contact the employer: *' + ctx[property + 'DB'].get('employers').value()[index_employer].phone + '*'
+            ctx.reply(ui_messages['apply_successful'] + job.title + reply, { parse_mode: 'markdown' })
+        } else {
+            ctx.reply('*' + job.question + '*' + job.title, { parse_mode: 'markdown', reply_markup: buttons.screening_answer_search(jobid).reply_markup})
+        }
+
+        return
+    }
+    if (action.startsWith('yes.')) {
+        let jobid = action.slice(4, -1)
+        jobid += action.slice(-1)
+        let job = db.getJob(ctx, jobid)
+
+        db.applyForJob(ctx, job.id)
+        let index_employer = db.findEmployer(ctx, job.userid)
+        db.setApplicantEmployer(ctx, index_employer, ctx.from.id)
+
+        index_employer = db.findEmployer(ctx, job.userid)
+        let reply = '\n'
+        if(job.application_method == 'email')
+            reply += 'Send your application to: *' + ctx[property + 'DB'].get('employers').value()[index_employer].email + '*'
+        else if(job.application_method == 'phone')
+            reply += 'Contact the employer: *' + ctx[property + 'DB'].get('employers').value()[index_employer].phone + '*'
+        
+        ctx.reply(ui_messages['apply_successful'] + job.title + reply, { parse_mode: 'markdown' })
+
+    }
     //--------------------------------------------------- Apply For a Job
     if (action === 'apply_for_job') {
 
@@ -135,8 +195,13 @@ app.on('callback_query', (ctx) => {
             db.applyForJob(ctx, job.id)
             let index_employer = db.findEmployer(ctx, job.userid)
             db.setApplicantEmployer(ctx, index_employer, ctx.from.id)
-            jobSeekerAction(ctx)
-            ctx.reply(ui_messages['apply_successful'] + job.title, { parse_mode: 'markdown' })
+            index_employer = db.findEmployer(ctx, job.userid)
+            let reply = '\n'
+            if(job.application_method == 'email')
+                reply += 'Send your application to: *' + ctx[property + 'DB'].get('employers').value()[index_employer].email + '*'
+            else if(job.application_method == 'phone')
+                reply += 'Contact the employer: *' + ctx[property + 'DB'].get('employers').value()[index_employer].phone + '*'
+            ctx.reply(ui_messages['apply_successful'] + job.title + reply, { parse_mode: 'markdown' })
         } else {
             ctx.reply('*' + job.question + '*' + job.title, { parse_mode: 'markdown', reply_markup: buttons.screening_answer.reply_markup})
         }
@@ -149,8 +214,15 @@ app.on('callback_query', (ctx) => {
         db.applyForJob(ctx, job.id)
         let index_employer = db.findEmployer(ctx, job.userid)
         db.setApplicantEmployer(ctx, index_employer, ctx.from.id)
-        jobSeekerAction(ctx)
-        ctx.reply(ui_messages['apply_successful'] + job.title, { parse_mode: 'markdown' })
+
+        index_employer = db.findEmployer(ctx, job.userid)
+        let reply = '\n'
+        if(job.application_method == 'email')
+            reply += 'Send your application to: *' + ctx[property + 'DB'].get('employers').value()[index_employer].email + '*'
+        else if(job.application_method == 'phone')
+            reply += 'Contact the employer: *' + ctx[property + 'DB'].get('employers').value()[index_employer].phone + '*'
+        
+        ctx.reply(ui_messages['apply_successful'] + job.title + reply, { parse_mode: 'markdown' })
 
     }
     else if (action === 'no') {
@@ -171,19 +243,11 @@ app.on('callback_query', (ctx) => {
     // --------------------------------------------------- Job Seeker
     else if (action === 'job_seeker') {
         jobSeekerAction(ctx)
-    } else if (action === 'edit_emp_profile') {
+    } else if (action === 'search_jobs') {
         let index = db.findIndex(ctx, ctx.from.id)
-
-        ctx.reply(ui_messages['employee_edit'], {reply_markup: buttons.cancel_emp.reply_markup, parse_mode:'markdown'})
-        db.setCommand(ctx, index, 'name')
-    } else if (action === 'view_emp_profile') {
-        let index = db.findIndex(ctx, ctx.from.id)
-
-        let emp = db.getEmployee(ctx, index)
-        ctx.reply('*Name:* ' + emp.name + '\n*Email and Phone: *' + emp.email + ', ' + emp.phone, {reply_markup:buttons.applied_jobs.reply_markup, parse_mode:'markdown'})
+        db.setCommand(ctx, index, 'search_jobs')
+        ctx.reply('Type in a key word or choose a category from below.', {reply_markup: keyboards.category_keys(ctx[property + 'DB'].get('categories').value()).reply_markup, parse_mode: 'markdown'});
     } else if (action === 'cancel_emp') {
-        let index = db.findIndex(ctx, ctx.from.id)
-
         ctx.reply('Operation Canceled')
         jobSeekerAction(ctx)
     } else if (action === 'applied_jobs') {
@@ -258,6 +322,18 @@ app.on('callback_query', (ctx) => {
         let index = db.findEmployer(ctx, ctx.from.id)
         ctx.reply(ui_messages['new_job_title'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
         db.setCommandEmployer(ctx, index, 'new_job_title', null)
+    } else if (action === 'telegram_method') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        db.setApplicationMethodEmployer(ctx, ctx[property + 'DB'].get('employers').value()[index].jobid, 'telegram')
+        ctx.reply( 'Applicants will contact you with Telegram.', {parse_mode: 'markdown'}).then()
+    } else if (action === 'email_method') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        db.setApplicationMethodEmployer(ctx, ctx[property + 'DB'].get('employers').value()[index].jobid, 'email')
+        ctx.reply( 'Applicants will contact you with Email.', {parse_mode: 'markdown'}).then()
+    } else if (action === 'phone_method') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        db.setApplicationMethodEmployer(ctx, ctx[property + 'DB'].get('employers').value()[index].jobid, 'phone')
+        ctx.reply( 'Applicants will contact you with Phone.', {parse_mode: 'markdown'}).then()
     } else if (action === 'add_screening_question') {
         let index = db.findEmployer(ctx, ctx.from.id)
         ctx.reply( ui_messages['pre_screening_question'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
@@ -435,10 +511,6 @@ app.on('callback_query', (ctx) => {
         } else {
             ctx.reply(ui_messages['no_applicant_cv'], {parse_mode: 'markdown'})
         }
-    } else if (action === 'edit_employer_profile') {
-        let index = db.findEmployer(ctx, ctx.from.id)
-        ctx.reply(ui_messages['employer_profile_edit'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
-        db.setCommandEmployer(ctx, index, 'name_employer', null)
     } else if (action === 'cancel_employer') {
         let index = db.findEmployer(ctx, ctx.from.id)
         ctx.reply(ui_messages['employer_cancel', {parse_mode: 'markdown'}])
@@ -794,15 +866,20 @@ app.on('text', (ctx) => {
     if (ctx.update.message.text == ''){
         return
     }
-    if (ctx.update.message.text == 'Job Seeker') {
+    if (ctx.update.message.text == '\uD83D\uDC54 Job Seeker') {
         ctx.update.callback_query = ctx.update
         jobSeekerAction(ctx)
         return
-    } else if (ctx.update.message.text == 'Employer') {
+    } else if (ctx.update.message.text == '\uD83D\uDCB8 Employer') {
         ctx.update.callback_query = ctx.update
         employerAction(ctx)
         return
-    } else if (ctx.update.message.text == 'Applied Jobs') {
+    } else if (ctx.update.message.text == '\uD83D\uDD0E Search Jobs') {
+        let index = db.findIndex(ctx, ctx.from.id)
+        db.setCommand(ctx, index, 'search_jobs')
+        ctx.reply('Type in a key word or choose a category from below.', {reply_markup: keyboards.category_keys(ctx[property + 'DB'].get('categories').value()).reply_markup, parse_mode: 'markdown'});
+        return
+    } else if (ctx.update.message.text == '\uD83D\uDCBC Applied Jobs') {
         let index = db.findIndex(ctx, ctx.from.id)
         if(index == null)
             return
@@ -818,27 +895,121 @@ app.on('text', (ctx) => {
             // jobSeekerAction(ctx)
         }
         return
+    } else if (ctx.update.message.text == '\uD83D\uDC64 Profile') {
+        ctx.reply('...',keyboards.profile()).then()
+        return
+    } else if (ctx.update.message.text == 'Job Seeker.') {
+        ctx.reply('...',keyboards.job_seeker_profile()).then()
+        return
+    } else if (ctx.update.message.text == 'Employer.') {
+        ctx.reply('...',keyboards.employer_profile()).then()
+        return
     } else if (ctx.update.message.text == 'View Profile') {
         let index = db.findIndex(ctx, ctx.from.id)
-        if(index == null)
+        if(index == null){
+            ctx.reply('Seems like you didn\'t setup the profile yet. *Wanna do it now?*', {reply_markup: keyboards.welcome(),parse_mode: 'markdown'}).then()
             return
+        }
         let emp = db.getEmployee(ctx, index)
         ctx.reply('*Name: *' + emp.name + '\n*Email and Phone: *' + emp.email + ', ' + emp.phone, {parse_mode: 'markdown'})
+        if(emp.cv != '')
+            ctx.telegram.sendDocument(ctx.update.message.chat.id, emp.cv)
+        return
+    } else if (ctx.update.message.text == 'View Profile.') {
+        let index = db.findEmployer(ctx, ctx.from.id)
+        if(index == null){
+            ctx.reply('Seems like you didn\'t setup the profile yet. *Wanna do it now?*', {reply_markup: keyboards.welcome(),parse_mode: 'markdown'}).then()
+            return
+        }
+        let emp = db.getEmployer(ctx, index)
+        let reply = '*Name: *' + emp.name
+        if (emp.email != '')
+            reply += '\n*Email: *' + emp.email
+        if (emp.phone != '')
+            reply += '\n*Phone: *' + emp.phone  
+        ctx.reply( reply, {parse_mode: 'markdown'})
         return
     } else if (ctx.update.message.text == 'Edit Profile') {
-        let index = db.findIndex(ctx, ctx.from.id)
-        ctx.reply(ui_messages['employee_edit'], {reply_markup: buttons.cancel_emp.reply_markup, parse_mode:'markdown'})
-        db.setCommand(ctx, index, 'name')
+        if(user.type == 'job_seeker') {
+            ctx.reply('Choose what to edit',keyboards.job_seeker_edit()).then()
+        } else if (user.type == 'employer') {
+            ctx.reply('Choose what to edit',keyboards.employer_edit()).then()
+        }
         return
-    } else if (ctx.update.message.text == 'Post a Job') {
+    } else if (ctx.update.message.text == 'Back to Menu') {
+        if(user.type == 'job_seeker') {
+            ctx.reply('...',keyboards.job_seeker()).then()
+        } else if (user.type == 'employer') {
+            ctx.reply('...',keyboards.employer()).then()
+        }else {
+            ctx.reply('...',keyboards.welcome()).then()
+        }
+        return
+    } 
+    //////////////// EDIT
+    else if (ctx.update.message.text == 'Name') {
+        if(user.type == 'job_seeker') {
+            let index = db.findIndex(ctx, ctx.from.id)
+            let emp = db.getEmployee(ctx, index)
+            db.setCommand(ctx,index, 'name_edit_employee')
+            ctx.reply('*Name: *' + emp.name + '\nPlease enter your new name', {parse_mode: 'markdown'}).then()
+
+        } else if (user.type == 'employer') {
+            let index = db.findEmployer(ctx, ctx.from.id)
+            let emp = db.getEmployer(ctx, index)
+            db.setCommandEmployer(ctx,index, 'name_edit_employer')
+            ctx.reply('*Name: *' + emp.name + '\nPlease enter your new name', {parse_mode: 'markdown'}).then()
+        }
+        return
+    } else if (ctx.update.message.text == 'Email') {
+        if(user.type == 'job_seeker') {
+            let index = db.findIndex(ctx, ctx.from.id)
+            let emp = db.getEmployee(ctx, index)
+            db.setCommand(ctx,index, 'email_edit_employee')
+            ctx.reply('*Email: *' + emp.email + '\nPlease enter your new email', {parse_mode: 'markdown'}).then()
+
+        } else if (user.type == 'employer') {
+            let index = db.findEmployer(ctx, ctx.from.id)
+            let emp = db.getEmployer(ctx, index)
+            db.setCommandEmployer(ctx,index, 'email_edit_employer')
+            ctx.reply('*Email: *' + emp.email + '\nPlease enter your new email', {parse_mode: 'markdown'}).then()
+        }
+        return
+    } else if (ctx.update.message.text == 'Phone') {
+        if(user.type == 'job_seeker') {
+            let index = db.findIndex(ctx, ctx.from.id)
+            let emp = db.getEmployee(ctx, index)
+            db.setCommand(ctx,index, 'phone_edit_employee')
+            ctx.reply('*Phone: *' + emp.phone + '\nPlease enter your new phone number', {parse_mode: 'markdown'}).then()
+
+        } else if (user.type == 'employer') {
+            let index = db.findEmployer(ctx, ctx.from.id)
+            let emp = db.getEmployer(ctx, index)
+            db.setCommandEmployer(ctx,index, 'phone_edit_employer')
+            ctx.reply('*Phone: *' + emp.phone + '\nPlease enter your new phone number', {parse_mode: 'markdown'}).then()
+        }
+        return
+    } else if (ctx.update.message.text == 'CV') {
+        if(user.type == 'job_seeker') {
+            let index = db.findIndex(ctx, ctx.from.id)
+            let emp = db.getEmployee(ctx, index)
+            db.setCommand(ctx,index, 'cv_edit_employee')
+            ctx.reply('Please upload your new CV in PDF or Word format', {parse_mode: 'markdown'}).then()
+
+        } 
+        return
+    } 
+    ////////////////// EDIT END
+    else if (ctx.update.message.text == '\uD83D\uDCC4 Post a Job') {
         let index = db.findEmployer(ctx, ctx.from.id)
         ctx.reply(ui_messages['new_job_title'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
         db.setCommandEmployer(ctx, index, 'new_job_title', null)
         return
-    } else if (ctx.update.message.text == 'Pending Jobs') {
+    } else if (ctx.update.message.text == '\uD83D\uDCD2 Pending Jobs') {
         let index = db.findEmployer(ctx, ctx.from.id)
         let jobs = db.getActiveJobs(ctx, 'pending')
-
+        if(index == null)
+            return
         if (jobs.length > 0) {
             let status = jobs[0].reviewed ? '\n' + ui_messages['job_is_posted'] + jobs[0].applicants.length : '\n' + ui_messages['job_is_being_reviewed']
             ctx.reply(ui_messages['pending_jobs']+'\n' + jobs[0].title + status, {reply_markup: buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'}).then()
@@ -847,10 +1018,11 @@ app.on('text', (ctx) => {
             ctx.reply(ui_messages['no_pending_jobs'], {parse_mode: 'markdown'})
         }
         return
-    } else if (ctx.update.message.text == 'Active Jobs') {
+    } else if (ctx.update.message.text == '\uD83D\uDCD7 Active Jobs') {
         let index = db.findEmployer(ctx, ctx.from.id)
         let jobs = db.getActiveJobs(ctx, 'active')
-
+        if(index == null)
+            return
         if (jobs.length > 0) {
             let status = jobs[0].reviewed ? '\n' + ui_messages['job_is_posted'] + jobs[0].applicants.length : '\n' + ui_messages['job_is_being_reviewed']
             ctx.reply( ui_messages['active_jobs'] +'\n' + jobs[0].title + status, {reply_markup: buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'}).then()
@@ -859,10 +1031,11 @@ app.on('text', (ctx) => {
             ctx.reply(ui_messages['no_active_jobs'], {parse_mode: 'markdown'})
         }
         return
-    } else if (ctx.update.message.text == 'Closed Jobs') {
+    } else if (ctx.update.message.text == '\uD83D\uDCD5 Closed Jobs') {
         let index = db.findEmployer(ctx, ctx.from.id)
         let jobs = db.getActiveJobs(ctx, 'closed')
-
+        if(index == null)
+            return
         if (jobs.length > 0) {
             ctx.reply( ui_messages['closed_jobs'] + '\n' + jobs[0].title, {reply_markup: buttons.browse_jobs(jobs[0].reviewed).reply_markup, parse_mode: 'markdown'}).then()
             db.setJobPage(ctx, index, 0, jobs)
@@ -870,12 +1043,17 @@ app.on('text', (ctx) => {
             ctx.reply(ui_messages['no_closed_jobs'], {parse_mode: 'markdown'})
         }
         return
-    } else if (ctx.update.message.text == 'Edit Profile.') {
-        let index = db.findEmployer(ctx, ctx.from.id)
-        ctx.reply(ui_messages['employer_profile_edit'], {reply_markup: buttons.cancel_employer.reply_markup, parse_mode: 'markdown'})
-        db.setCommandEmployer(ctx, index, 'name_employer', null)
+    } else if (ctx.update.message.text == '\uD83C\uDFC1 I\'m done') {
+        var user = db.getUser(ctx);
+        if(user == null)
+            return
+        db.logOutAdmin(ctx, user.index)
+        ctx.telegram.sendMessage(ctx.from.id, '...',keyboards.welcome()).then()
+        ctx.reply(ui_messages['user_logged_out'], {parse_mode: 'markdown'})
         return
-    } else if (ctx.update.message.text == 'Pending Jobs Admin') {
+    } 
+    ///////////////////////////////////////////////////////////////////////////////////////ADMIN
+    else if (ctx.update.message.text == '\uD83D\uDCD2 Pending Jobs Admin') {
         let user = db.getUser(ctx);
         let jobs = db.getPendingJobsAdmin(ctx)
         if (jobs.length > 0) {
@@ -885,7 +1063,7 @@ app.on('text', (ctx) => {
             ctx.reply('No active jobs with this account :(\n', buttons.admin)
         }
         return
-    } else if (ctx.update.message.text == 'Active Jobs Admin') {
+    } else if (ctx.update.message.text == '\uD83D\uDCD7 Active Jobs Admin') {
         let user = db.getUser(ctx);
         let jobs = db.getPostedJobs(ctx)
         if (jobs.length > 0) {
@@ -895,7 +1073,7 @@ app.on('text', (ctx) => {
             ctx.reply('No posted jobs :(\n', buttons.admin)
         }
         return
-    } else if (ctx.update.message.text == 'Closed Jobs Admin') {
+    } else if (ctx.update.message.text == '\uD83D\uDCD5 Closed Jobs Admin') {
         let user = db.getUser(ctx);
         let jobs = db.getClosedJobs(ctx)
         if (jobs.length > 0) {
@@ -905,7 +1083,7 @@ app.on('text', (ctx) => {
             ctx.reply('No posted jobs :(\n', buttons.admin)
         }
         return
-    } else if (ctx.update.message.text == 'Automated Replies') {
+    } else if (ctx.update.message.text == '\uD83D\uDCE4 Automated Replies') {
         let user = db.getUser(ctx);
         let replies = db.getAdminReplies(ctx)
         if (replies.length > 0) {
@@ -915,7 +1093,7 @@ app.on('text', (ctx) => {
             ctx.reply('No Automated Replies :(\n', buttons.add_replies)
         }
         return
-    } else if (ctx.update.message.text == 'Customize Messages') {
+    } else if (ctx.update.message.text == '\u2709: Customize Messages') {
         let user = db.getUser(ctx);
         if (user.type != 'admin'){
             return
@@ -929,7 +1107,7 @@ app.on('text', (ctx) => {
             ctx.reply('No Bot Messages :(\n', buttons.admin)
         }
         return
-    } else if (ctx.update.message.text == 'Feedback') {
+    } else if (ctx.update.message.text == '\uD83D\uDCE8 Feedback') {
         let user = db.getUser(ctx);
         if (user) {
             db.setCommandUser(ctx, user.index, 'feedback')
@@ -1075,9 +1253,41 @@ app.on('text', (ctx) => {
                             }
                             break
                         }
+                    case 'name_edit_employer':
+                        {
+                            ctx.reply("Name edited Successfuly\n" + ctx.update.message.text, {parse_mode: 'markdown'});
+                            db.setNameEmployer(ctx, index, ctx.update.message.text)
+                            index = db.findEmployer(ctx, ctx.from.id)
+                            db.setCommandEmployer(ctx, index, '', null)
+                            break
+                        }
+                    case 'email_edit_employer':
+                        {
+                            if (emailRegexp.test(ctx.update.message.text)) {
+                                ctx.reply("Email edited Successfuly\n" + ctx.update.message.text, {parse_mode: 'markdown'});
+                                db.setEmailEmployer(ctx, index, ctx.update.message.text)
+                                index = db.findEmployer(ctx, ctx.from.id)
+                                db.setCommandEmployer(ctx, index, '', null)
+                            } else {
+                                ctx.reply(ui_messages['invalid_email'], {parse_mode: 'markdown'})
+                            }
+                            break
+                        }
+                    case 'phone_edit_employer':
+                        {
+                            if (phoneRegExp.test(ctx.update.message.text)) {
+                                ctx.reply("Phone edited Successfuly\n" + ctx.update.message.text, {parse_mode: 'markdown'});
+                                db.setPhoneEmployer(ctx, index, ctx.update.message.text)
+                                index = db.findEmployer(ctx, ctx.from.id)
+                                db.setCommandEmployer(ctx, index, '', null)
+                            } else {
+                                ctx.reply(ui_messages['invalid_phone'], {parse_mode: 'markdown'})
+                            }
+                            break
+                        }
                     case 'new_job_title':
                         {
-                            ctx.reply("Job Title: *" + ctx.update.message.text + "*\n" + ui_messages['job_description']);
+                            ctx.reply("Job Title: *" + ctx.update.message.text + "*\n" + 'Select a category', {reply_markup: keyboards.category_keys(ctx[property + 'DB'].get('categories').value()).reply_markup, parse_mode: 'markdown'});
                             let job = {
                                 id: -1,
                                 command: '',
@@ -1096,9 +1306,21 @@ app.on('text', (ctx) => {
                             job.applicants = []
                             job.date = new Date()
                             job.chatId = ctx.update.message.chat.id
+                            job.application_method = 'telegram'
+                            job.category = ''
                             ctx[property + 'DB'].get('jobs').push(job).write()
                             index = db.findEmployer(ctx, ctx.from.id)
-                            db.setCommandEmployer(ctx, index, 'job_description', job.id)
+                            db.setCommandEmployer(ctx, index, 'job_category', job.id)
+                            break
+                        }
+                    case 'job_category':
+                        {
+                            ctx.reply('...',keyboards.employer()).then()
+                            ctx.reply("Category: " + ctx.update.message.text + "\n" + ui_messages['job_description'], {parse_mode: 'markdown'});
+                            index = db.findEmployer(ctx, ctx.from.id)
+                            db.setJobCategory(ctx, ctx[property + 'DB'].get('employers').value()[index].jobid, ctx.update.message.text)
+                            db.setCommandEmployer(ctx, index, 'job_description', null)
+                            // employerAction(ctx)
                             break
                         }
                     case 'job_description':
@@ -1106,7 +1328,6 @@ app.on('text', (ctx) => {
                             ctx.reply("Description: " + ctx.update.message.text + "\n" + ui_messages['job_successfully_added'], {reply_markup: buttons.screening_question.reply_markup, parse_mode: 'markdown'});
                             index = db.findEmployer(ctx, ctx.from.id)
                             db.setJobDescription(ctx, ctx[property + 'DB'].get('employers').value()[index].jobid, ctx.update.message.text)
-                            index = db.findEmployer(ctx, ctx.from.id)
                             db.setCommandEmployer(ctx, index, '', null)
                             // employerAction(ctx)
                             break
@@ -1188,6 +1409,57 @@ app.on('text', (ctx) => {
                             }
                             break
                         }
+                    case 'name_edit_employee':
+                        {
+                            ctx.reply("Name edited Successfuly\n" + ctx.update.message.text, {parse_mode: 'markdown'});
+                            db.setName(ctx, index, ctx.update.message.text)
+                            index = db.findIndex(ctx, ctx.from.id)
+                            db.setCommand(ctx, index, '', null)
+                            break
+                        }
+                    case 'email_edit_employee':
+                        {
+                            if (emailRegexp.test(ctx.update.message.text)) {
+                                ctx.reply("Email edited Successfuly\n" + ctx.update.message.text, {parse_mode: 'markdown'});
+                                db.setEmail(ctx, index, ctx.update.message.text)
+                                index = db.findIndex(ctx, ctx.from.id)
+                                db.setCommand(ctx, index, '', null)
+                            } else {
+                                ctx.reply(ui_messages['invalid_email'], {parse_mode: 'markdown'})
+                            }
+                            break
+                        }
+                    case 'phone_edit_employee':
+                        {
+                            if (phoneRegExp.test(ctx.update.message.text)) {
+                                ctx.reply("Phone edited Successfuly\n" + ctx.update.message.text, {parse_mode: 'markdown'});
+                                db.setPhone(ctx, index, ctx.update.message.text)
+                                index = db.findIndex(ctx, ctx.from.id)
+                                db.setCommand(ctx, index, '', null)
+                            } else {
+                                ctx.reply(ui_messages['invalid_phone'], {parse_mode: 'markdown'})
+                            }
+                            break
+                        }
+                    case 'search_jobs':
+                    {
+                        ctx.reply('...',keyboards.job_seeker()).then()
+                        let results = db.searchJobs(ctx, ctx.update.message.text)
+                        if (results.length > 0) {
+                            if (results.length > 5)
+                                results = results.slice(0, 5)
+                            let temp = "*Search Results* \n"
+                            let i = 1
+                            results.forEach(element => {
+                                temp += '*' + i + '* - ' + element.title
+                                i ++
+                            });
+                            ctx.reply(temp, {parse_mode: 'markdown', reply_markup: buttons.job_details(results).reply_markup});
+                        } else {
+                            ctx.reply("Couldn't find any jobs :(", {parse_mode: 'markdown'});
+                        }
+                        break
+                    }
                 }
                 break
             }
@@ -1236,17 +1508,24 @@ app.on('text', (ctx) => {
 
 app.on('document', (ctx) => {
     let index = db.findIndex(ctx, ctx.from.id)
+    if(index == null)
+        return
     if (ctx[property + 'DB'].get('employees').value()[index].command == 'file') {
+        // check if file is PDF or Word
         db.setCV(ctx, index, ctx.update.message.document.file_id);
         ctx.reply(ui_messages['employee_registration_successfull'], {parse_mode: 'markdown'});
         jobSeekerAction(ctx)
+    } else if (ctx[property + 'DB'].get('employees').value()[index].command == 'cv_edit_employee') {
+        // check if file is PDF or Word
+        db.setCV(ctx, index, ctx.update.message.document.file_id);
+        ctx.reply('CV edited successfully', {parse_mode: 'markdown'});
     } else {
         ctx.reply(ui_messages['file_error'], {parse_mode: 'markdown'});
     }
 });
 
 
-app.launch()
+app.startPolling()
 
 function jobSeekerAction(ctx) {
     let user = db.getUser(ctx);
