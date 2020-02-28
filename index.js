@@ -1,5 +1,3 @@
-'strict mode'
-
 const Telegraf = require('telegraf')
 var express = require('express');
 
@@ -1624,6 +1622,6 @@ server.listen(server_port, server_host, function() {
 });
 
 
-server.get("/", fucntion (req,res) {
+server.get("/", function (req,res) {
            res.send("Hello World");
            });
