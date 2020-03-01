@@ -1615,9 +1615,12 @@ function employerAction(ctx) {
 var server = express();
 
 
-var server_port = process.env.PORT || 80;
-var server_host = '0.0.0.0';
-server.listen(server_port, server_host, function() {
+// var server_port = process.env.PORT || 80;
+// var server_host = '0.0.0.0';
+
+var ipaddress = process.env.OPENSHIFT_NODEJS_IP || "127.0.0.1";
+var port = process.env.OPENSHIFT_NODEJS_PORT || 80;
+server.listen(port, ipaddress, function() {
     console.log('Listening on port %d', server_port);
 });
 
