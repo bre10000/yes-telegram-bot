@@ -60,3 +60,9 @@ All database related functions like fetching and reading data are located here.
 ## yes_db.json
 
 The database file
+
+# Features and Flow
+
+![Yes Bot](main.png)
+
+![Admin](admin.png)
