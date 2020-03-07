@@ -63,6 +63,6 @@ The database file
 
 # Features and Flow
 
-![Yes Bot](./main.png)
+![Yes Bot](./main.png  "Main Image")
 
-![Admin](./admin.png)
+![Admin](./admin.png "Admin Image")
